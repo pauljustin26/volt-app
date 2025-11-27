@@ -21,66 +21,16 @@ import { useRouter } from "expo-router";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-// QR images (These paths are assumed to be correct relative to the file)
 const QR_IMAGES = {
   gcash: require("../../assets/images/gcash-qr.jpg"),
   maya: require("../../assets/images/maya-qr.jpg"),
 };
 
-// Hardcoded status colors for reliability and visual impact
 const STATUS_COLORS = {
-    succeeded: { color: '#1B8552', background: '#D6F5E3' }, // Green
-    denied: { color: '#EB4747', background: '#FDE4E4' },     // Red
-    pending: { color: '#FDAE37', background: '#FFF7E6' },    // Orange/Yellow
+    succeeded: { color: '#1B8552', background: '#D6F5E3' },
+    denied: { color: '#EB4747', background: '#FDE4E4' },
+    pending: { color: '#FDAE37', background: '#FFF7E6' },
 };
-
-// --- Transaction Status Component (Defined Locally) ---
-const StatusIndicator = ({ status, theme, transaction }: { status: 'pending' | 'succeeded' | 'denied' | null, theme: any, transaction: any }) => {
-  if (!status || !transaction) return null;
-
-  const { color, background } = STATUS_COLORS[status];
-  const amountText = transaction.amount ? `₱${parseFloat(transaction.amount).toFixed(2)}` : 'N/A';
-  
-  let iconName: keyof typeof Ionicons.glyphMap;
-  let message: string;
-
-  switch (status) {
-    case 'succeeded':
-      iconName = 'checkmark-circle';
-      message = `Top-up Approved! ${amountText} added to your wallet.`;
-      break;
-    case 'denied':
-      iconName = 'close-circle';
-      message = `Top-up Denied. The submitted receipt was deemed invalid.`;
-      break;
-    case 'pending':
-    default:
-      iconName = 'time';
-      message = `Awaiting Admin Approval for ${amountText}. This may take up to 24 hours.`;
-  }
-
-  return (
-    <Card style={[styles.statusCardAlert, { borderLeftColor: color, backgroundColor: background }]}>
-        <Card.Content style={styles.statusContentAlert}>
-            {status === 'pending' ? (
-                <ActivityIndicator size="small" color={color} style={{ marginRight: 15 }} />
-            ) : (
-                <Ionicons name={iconName as any} size={24} color={color} style={{ marginRight: 15 }} />
-            )}
-            <View style={{ flex: 1 }}>
-                <Text style={{ color, fontWeight: 'bold' }}>
-                    {status.toUpperCase()}
-                </Text>
-                <Text style={{ color: theme.colors.onSurface, fontSize: 13, marginTop: 2 }}>
-                    {message}
-                </Text>
-            </View>
-        </Card.Content>
-    </Card>
-  );
-};
-
-// --- Main Component ---
 
 export default function RechargeGcashScreen() {
   const router = useRouter();
@@ -96,17 +46,15 @@ export default function RechargeGcashScreen() {
   const authInstance = getAuth();
   const user = authInstance.currentUser;
 
-  // --- Real-time listener for checking existing PENDING transaction ---
   useEffect(() => {
     let unsubscribe: Unsubscribe = () => {};
     
     if (user) {
-        // Query for the user's latest PENDING top-up
         const q = query(
             collection(db, "transactions"),
             where("userId", "==", user.uid),
             where("type", "==", "topup"),
-            where("status", "==", "pending"), // Filter specifically for pending
+            where("status", "==", "pending"),
             orderBy("createdAt", "desc")
         );
 
@@ -148,13 +96,11 @@ export default function RechargeGcashScreen() {
     }
   };
 
-  // Upload receipt
   const handleUpload = async () => {
     const amountValue = parseFloat(amount);
     if (!amountValue || amountValue <= 0) return showAlert("Please enter a valid amount (e.g., 100.00).", true);
     if (!receipt) return showAlert("Please select the payment receipt image.", true);
     
-    // Check local state based on Firestore listener
     if (latestTxn) {
         return router.push({
             pathname: "/wallet/status",
@@ -189,10 +135,8 @@ export default function RechargeGcashScreen() {
         },
       });
 
-      // Assuming backend returns { transactionId: '...' }
       const { transactionId, amount } = response.data;
 
-      // SUCCESS: Navigate immediately to the status screen
       router.replace({
         pathname: "/wallet/status",
         params: { txnId: transactionId, status: 'pending', amount: amount.toString() }
@@ -206,7 +150,6 @@ export default function RechargeGcashScreen() {
     }
   };
 
-  // Download QR image
   const downloadQR = async () => {
     const url = Image.resolveAssetSource(QR_IMAGES[paymentMethod]).uri;
     try {
@@ -222,7 +165,7 @@ export default function RechargeGcashScreen() {
     }
   };
   
-  const isFormDisabled = loading || !!latestTxn; // Disable if submitting or if a PENDING transaction exists
+  const isFormDisabled = loading || !!latestTxn;
 
   return (
     <LinearGradient
@@ -232,14 +175,24 @@ export default function RechargeGcashScreen() {
       end={{ x: 0, y: 1 }}
     >
       <SafeAreaView style={{ flex: 1, paddingHorizontal: 20 }}>
+        
+        {/* --- NEW HEADER SECTION STARTS HERE --- */}
+        <View style={styles.headerContainer}>
+            <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={28} color="#fff" />
+            </TouchableOpacity>
+            
+            <Text style={[styles.mainHeader, { color: "#fff" }]}>
+                Top-up Wallet
+            </Text>
+            
+            {/* Empty view to balance the flex layout and keep title centered */}
+            <View style={styles.headerSpacer} />
+        </View>
+        {/* --- NEW HEADER SECTION ENDS HERE --- */}
+
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
-          {/* Main Title */}
-          <Text style={[styles.mainHeader, { color: theme.colors.primary }]}>
-            Top-up Wallet
-          </Text>
-
-          {/* Alert if Pending Txn Exists */}
           {!!latestTxn && (
              <Card style={[styles.statusCardAlert, { borderColor: STATUS_COLORS.pending.color, backgroundColor: STATUS_COLORS.pending.background }]}>
                 <Card.Content style={styles.statusContentAlert}>
@@ -268,13 +221,11 @@ export default function RechargeGcashScreen() {
             </Card>
           )}
 
-          {/* Top-up Form Card (Vertically Centered Content) */}
           <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary, opacity: isFormDisabled ? 0.6 : 1, marginTop: latestTxn ? 20 : 0 }]}>
             <Card.Content>
 
               <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>1. Select Payment Method</Text>
 
-              {/* Payment method selection (Segmented Buttons) */}
               <View style={styles.segmentedControlContainer}>
                 <TouchableOpacity
                   onPress={() => setPaymentMethod('gcash')}
@@ -304,7 +255,6 @@ export default function RechargeGcashScreen() {
 
               <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 25 }]}>2. Scan QR Code</Text>
 
-              {/* QR Image */}
               <TouchableOpacity 
                 onPress={downloadQR} 
                 style={styles.qrContainer}
@@ -322,7 +272,6 @@ export default function RechargeGcashScreen() {
 
               <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 25 }]}>3. Enter Details & Upload Receipt</Text>
 
-              {/* Amount Input */}
               <TextInput
                 placeholder="Amount (₱)"
                 keyboardType="numeric"
@@ -334,7 +283,6 @@ export default function RechargeGcashScreen() {
                 theme={{ colors: { primary: theme.colors.primary, background: "transparent" } }}
               />
 
-              {/* Receipt Upload */}
               <Button
                 mode="outlined"
                 onPress={pickReceipt}
@@ -368,7 +316,6 @@ export default function RechargeGcashScreen() {
         </ScrollView>
       </SafeAreaView>
       
-      {/* Universal Snackbar */}
       <Snackbar
         visible={snackbar.visible}
         onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
@@ -384,16 +331,32 @@ export default function RechargeGcashScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // --- NEW HEADER STYLES ---
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  backButton: {
+    padding: 5,
+    borderRadius: 20,
+    width: 40, 
+    alignItems: 'flex-start'
+  },
+  headerSpacer: {
+    width: 40, // Should match backButton width to keep title centered
+  },
+  // -------------------------
   scrollContent: { 
     flexGrow: 1, 
-    justifyContent: 'center', // Vertically center the content 
     paddingVertical: 10,
   },
   mainHeader: { 
-    fontSize: 28, 
+    fontSize: 24, // Slightly smaller to fit in row
     fontWeight: "bold", 
-    marginBottom: 25, 
-    textAlign: "center" 
+    textAlign: "center",
   },
   card: { 
     borderRadius: 15, 
@@ -404,8 +367,6 @@ const styles = StyleSheet.create({
     fontWeight: "600", 
     marginBottom: 10 
   },
-  
-  // Segmented Control Styles
   segmentedControlContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -424,10 +385,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-
   qrContainer: {
     padding: 10,
-    backgroundColor: 'white', // Ensure QR code is readable
+    backgroundColor: 'white',
     borderRadius: 15,
     marginBottom: 10,
   },
@@ -444,11 +404,9 @@ const styles = StyleSheet.create({
   uploadButton: {
     marginBottom: 15,
   },
-  
-  // Status Card Styles
   statusCardAlert: {
     borderRadius: 12,
-    borderLeftWidth: 8, // Emphasize status visually
+    borderLeftWidth: 8,
     padding: 0,
     elevation: 3,
   },
