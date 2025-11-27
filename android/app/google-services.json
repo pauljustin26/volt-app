@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "990271563269",
+    "project_id": "voltvault-c1ba3",
+    "storage_bucket": "voltvault-c1ba3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:990271563269:android:d419c887efbef9312cde6c",
+        "android_client_info": {
+          "package_name": "com.pauljustin.volt"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_vXJW5e9TgImoqigqnTbwEhIiyUjBm8s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
