@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { StyleSheet, Image, View, TouchableOpacity, Share, ScrollView, Linking, Platform, Modal } from "react-native"; // ⭐ Added Modal
+import { StyleSheet, Image, View, TouchableOpacity, Share, ScrollView, Linking, Platform, Modal } from "react-native"; 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { 
   Text, 
@@ -9,7 +9,6 @@ import {
   useTheme, 
   ActivityIndicator, 
   Snackbar,
-  Divider,
   SegmentedButtons
 } from "react-native-paper";
 import * as ImagePicker from "expo-image-picker";
@@ -20,6 +19,9 @@ import { collection, query, where, orderBy, onSnapshot, Unsubscribe } from "fire
 import { db } from "../../config/firebaseConfig"; 
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as ExpoLinking from 'expo-linking';
+// ⭐ Import WebView
+import { WebView } from 'react-native-webview';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -52,6 +54,9 @@ export default function RechargeGcashScreen() {
   // ⭐ Lightbox State
   const [lightboxVisible, setLightboxVisible] = useState(false);
 
+  // ⭐ PayMongo WebView State
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+
   const authInstance = getAuth();
   const user = authInstance.currentUser;
 
@@ -65,7 +70,7 @@ export default function RechargeGcashScreen() {
             where("userId", "==", user.uid),
             where("type", "==", "topup"),
             where("status", "==", "pending"),
-            where("method", "in", ["gcash_manual", "maya_manual"]), // Only block manual ones
+            where("method", "in", ["gcash_manual", "maya_manual"]), 
             orderBy("createdAt", "desc")
         );
 
@@ -77,7 +82,7 @@ export default function RechargeGcashScreen() {
                 setLatestTxn(null);
             }
         }, (error) => {
-            // Ignore index errors if query just changed
+            // Ignore index errors
         });
     }
 
@@ -88,6 +93,24 @@ export default function RechargeGcashScreen() {
     setSnackbar({ visible: true, message, isError });
   };
 
+  // ⭐ UPDATE THE WEB RETURN HANDLER
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // 1. Get the current URL
+      const currentUrl = new URL(window.location.href);
+      const params = new URLSearchParams(currentUrl.search);
+      const status = params.get('status');
+
+      // 2. Check for Cancel
+      if (status === 'cancelled') {
+         showAlert("Payment Cancelled", true);
+         
+         // Optional: Clean the URL so a refresh doesn't show the alert again
+         window.history.replaceState({}, '', '/wallet/recharge');
+      }
+    }
+  }, []);
+
   // --- ONLINE PAYMENT (PayMongo) ---
   const handlePayMongo = async () => {
     const amountValue = parseFloat(amount);
@@ -96,23 +119,73 @@ export default function RechargeGcashScreen() {
     setLoading(true);
     try {
         const token = await user?.getIdToken();
+        
+        let redirectBaseUrl = "";
+        
+        if (Platform.OS === 'web') {
+            // Web: Use the real browser URL (e.g. localhost:8081)
+            redirectBaseUrl = window.location.origin; 
+        } else {
+            // ⭐ MOBILE FIX: Use a hardcoded HTTP URL.
+            // We use this "dummy" URL so PayMongo accepts it.
+            // The WebView will intercept this URL before it actually loads.
+            redirectBaseUrl = "https://voltvault.com"; 
+        }
+
         const res = await axios.post(
             `${API_URL}/wallet/topup-online`,
-            { amount: amountValue },
+            { 
+                amount: amountValue,
+                redirectBaseUrl: redirectBaseUrl 
+            },
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        // Open checkout URL
         if (res.data.checkoutUrl) {
-            await Linking.openURL(res.data.checkoutUrl);
-            // Optionally redirect user to a "Waiting for payment" screen or just reset
-            setAmount("");
+            if (Platform.OS === 'web') {
+                window.location.href = res.data.checkoutUrl;
+            } else {
+                setPaymentUrl(res.data.checkoutUrl);
+            }
         }
     } catch (err: any) {
         console.error(err);
         showAlert("Failed to initialize online payment.", true);
     } finally {
         setLoading(false);
+    }
+  };
+
+  // ⭐ Handle WebView Navigation (Success/Cancel interception)
+  const handleWebViewNavigation = (navState: any) => {
+    const { url } = navState;
+    if (!url) return;
+
+    // 1. SUCCESS: Navigate to Status Screen
+    if (url.includes('/wallet/status') && url.includes('succeeded')) { 
+        setPaymentUrl(null); // Close WebView
+        setAmount("");
+        
+        // Extract amount from URL safely using Regex
+        const amountMatch = url.match(/amount=([^&]*)/);
+        const extractedAmount = amountMatch ? amountMatch[1] : "0";
+
+        // Navigate to Status Screen
+        router.replace({
+            pathname: "/wallet/status",
+            params: { 
+                status: 'succeeded', 
+                amount: extractedAmount,
+                // We use a placeholder ID because the real ID is created 
+                // asynchronously by your Webhook.
+                txnId: 'online_success_pending_webhook' 
+            }
+        });
+    } 
+    // 2. CANCEL: Stay on Recharge Screen
+    else if (url.includes('/wallet/recharge') && url.includes('cancelled')) {
+        setPaymentUrl(null); // Close WebView
+        showAlert("Payment Cancelled", true);
     }
   };
 
@@ -153,18 +226,15 @@ export default function RechargeGcashScreen() {
       const formData = new FormData();
       formData.append("amount", amountValue.toString());
       formData.append("userUID", user?.uid || "");
-      formData.append("method", paymentMethod); // "gcash" or "maya"
+      formData.append("method", paymentMethod); 
       
       const fileName = receipt.fileName || `receipt_${Date.now()}.jpg`;
 
-      // ⭐ FIX: Platform-specific file handling
       if (Platform.OS === 'web') {
-        // Web: Convert URI to Blob
         const res = await fetch(receipt.uri);
         const blob = await res.blob();
         formData.append("receipt", blob, fileName);
       } else {
-        // Mobile: Use JSON object
         const fileType = receipt.type === 'image' ? 'image/jpeg' : 'application/octet-stream';
         formData.append("receipt", {
           uri: receipt.uri,
@@ -197,7 +267,6 @@ export default function RechargeGcashScreen() {
   };
 
   const downloadQR = async () => {
-    // Only works on mobile
     if (Platform.OS === 'web') {
        showAlert("Please save the image manually on web.", false);
        return;
@@ -230,13 +299,14 @@ export default function RechargeGcashScreen() {
               <Text style={[styles.mainHeader, { color: "#fff" }]}>Recharge Wallet</Text>
               <View style={styles.headerSpacer} />
           </View>
+          
           {/* Mode Switcher */}
           <View style={styles.modeContainer}>
              <SegmentedButtons
                 value={mode}
                 onValueChange={val => {
                     setMode(val as "manual" | "online");
-                    setAmount(""); // Reset amount when switching
+                    setAmount(""); 
                 }}
                 buttons={[
                   {
@@ -417,7 +487,7 @@ export default function RechargeGcashScreen() {
                     icon="share-variant" 
                     onPress={downloadQR}
                     buttonColor="#fff"
-                    textColor={theme.colors.onPrimary}
+                    textColor={theme.colors.primary}
                     style={{ marginBottom: 10, width: 200 }}
                 >
                     Share QR
@@ -433,6 +503,35 @@ export default function RechargeGcashScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* ⭐ Payment WebView Modal (In-App Browser) */}
+      <Modal
+        visible={!!paymentUrl}
+        animationType="slide"
+        onRequestClose={() => setPaymentUrl(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+            {/* Header with Close Button */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderColor: '#eee' }}>
+                <TouchableOpacity onPress={() => setPaymentUrl(null)} style={{ padding: 10 }}>
+                     <Ionicons name="close" size={30} color="#000" />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', marginLeft: 10 }}>Secure Payment</Text>
+            </View>
+
+            {/* The Browser */}
+            <WebView
+                source={{ uri: paymentUrl || '' }}
+                onNavigationStateChange={handleWebViewNavigation}
+                startInLoadingState={true}
+                renderLoading={() => (
+                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}>
+                        <ActivityIndicator size="large" color={theme.colors.primary} />
+                    </View>
+                )}
+            />
+        </SafeAreaView>
       </Modal>
 
     </LinearGradient>
@@ -471,7 +570,7 @@ const styles = StyleSheet.create({
   statusContentAlert: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 15 },
   modeContainer: { marginBottom: 5 },
 
-  // ⭐ Lightbox Styles
+  // Lightbox Styles
   lightboxOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',

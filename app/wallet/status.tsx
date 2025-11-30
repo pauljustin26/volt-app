@@ -95,6 +95,15 @@ export default function TransactionStatusScreen() {
             return;
         }
 
+        // ⭐ FIX: If this is the placeholder ID, do NOT fetch from Firestore.
+        // We simply trust the data passed via params and show the Success UI.
+        if (initialTxnId === 'online_success_pending_webhook') {
+            setCurrentStatus('succeeded');
+            setLoading(false);
+            return; 
+        }
+
+        // Only run this logic for REAL IDs (Manual uploads or History items)
         const txnRef = doc(db, 'transactions', initialTxnId);
         
         const unsubscribe = onSnapshot(txnRef, (snapshot) => {
@@ -103,7 +112,6 @@ export default function TransactionStatusScreen() {
                 const newStatus = (data.status as 'pending' | 'succeeded' | 'denied');
 
                 if (newStatus !== currentStatus && newStatus !== 'pending') {
-                    // Show confirmation snackbar when status changes to resolved
                     setSnackbar({ 
                         visible: true, 
                         message: `Transaction ${newStatus.toUpperCase()}!`, 
@@ -119,7 +127,10 @@ export default function TransactionStatusScreen() {
             setLoading(false);
         }, (error) => {
             console.error("Status listener error:", error);
-            setSnackbar({ visible: true, message: "Failed to track status.", isError: true });
+            // Don't show error for permission issues if it's just a lag
+            if (!error.message.includes('permission')) {
+                 setSnackbar({ visible: true, message: "Failed to track status.", isError: true });
+            }
             setLoading(false);
         });
 
