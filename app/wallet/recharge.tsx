@@ -420,13 +420,14 @@ export default function RechargeGcashScreen() {
                     <View style={{ alignItems: 'center', marginBottom: 20 }}>
                         <Ionicons name="card-outline" size={60} color={theme.colors.primary} />
                         <Text style={{ textAlign: 'center', marginTop: 10, color: theme.colors.onSurfaceVariant }}>
-                            Pay instantly using GCash, Maya, or Cards via PayMongo. Balance is updated automatically.
+                            Pay instantly using GCash, Maya, or Cards. Balance is updated automatically.
                         </Text>
                     </View>
-
+                    <Text style={{ color: '#fff', marginBottom: 15 }}>
+                        Minimum recharge amount is ₱100
+                    </Text>
                     <TextInput
-                        label="Amount (₱)"
-                        placeholder="Min. 100.00"
+                        placeholder="Amount (₱)"
                         keyboardType="numeric"
                         value={amount}
                         onChangeText={setAmount}
@@ -486,8 +487,8 @@ export default function RechargeGcashScreen() {
                     mode="contained" 
                     icon="share-variant" 
                     onPress={downloadQR}
-                    buttonColor="#fff"
-                    textColor={theme.colors.primary}
+                    buttonColor={theme.colors.primary}
+                    textColor={theme.colors.onPrimary}
                     style={{ marginBottom: 10, width: 200 }}
                 >
                     Share QR
@@ -495,7 +496,7 @@ export default function RechargeGcashScreen() {
                 
                 <Button 
                     mode="text" 
-                    textColor="#fff" 
+                    textColor={theme.colors.primary}
                     onPress={() => setLightboxVisible(false)}
                 >
                     Close
@@ -562,7 +563,7 @@ const styles = StyleSheet.create({
   segmentedControlContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 5 },
   segmentedButton: { flex: 1, borderWidth: 1, borderRadius: 8, paddingVertical: 10, marginHorizontal: 5, alignItems: 'center' },
   segmentText: { fontWeight: 'bold', fontSize: 16 },
-  qrContainer: { padding: 10, backgroundColor: 'white', borderRadius: 15, marginBottom: 10 },
+  qrContainer: { padding: 10, backgroundColor: 'transparent', borderRadius: 15, marginBottom: 10 },
   qr: { width: "100%", height: 200, borderRadius: 12, alignSelf: "center" },
   input: { marginBottom: 15, backgroundColor: "transparent" },
   uploadButton: { marginBottom: 15 },

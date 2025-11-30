@@ -51,14 +51,14 @@ export default function TransactionHistory() {
 
           if (data.type === 'rent') {
              displayAmount = data.fee || 0;
-             description = `Volt Rental ${data.voltID || ''}`;
+             description = `Volt ${data.voltID || ''}`;
           } else if (data.type === 'return') {
              // For returns, we only show the penalty as the "amount" deducted
              displayAmount = data.penaltyFee || 0;
-             description = `Volt Return ${data.voltID || ''}`;
+             description = `Volt ${data.voltID || ''}`;
           } else if (data.type === 'topup') {
              displayAmount = data.amount || 0;
-             description = "Wallet Top-up";
+             description = "Wallet Recharge";
           }
 
           return {
@@ -308,7 +308,7 @@ export default function TransactionHistory() {
 const styles = StyleSheet.create({
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  list: { padding: 16, paddingTop: 16 },
+  list: { padding: 16, paddingTop: 16, paddingBottom: 100 },
   fixedHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
   listHeader: { fontWeight: "700", marginTop: 12, marginBottom: 12 },
   card: { marginBottom: 12, borderRadius: 12 },

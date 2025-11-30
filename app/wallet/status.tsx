@@ -37,7 +37,7 @@ const StatusIndicator = ({ status, theme, amount, txnId }: { status: 'pending' |
     case 'succeeded':
       iconName = 'checkmark-circle';
       title = 'Transaction Approved!';
-      message = `Success! ${amountText} has been credited to your wallet. You can now use your balance for renting.`;
+      message = `${amountText} has been added to your wallet. You can now use your balance for renting.`;
       break;
     case 'denied':
       iconName = 'close-circle';
@@ -48,7 +48,7 @@ const StatusIndicator = ({ status, theme, amount, txnId }: { status: 'pending' |
     default:
       iconName = 'time';
       title = 'Awaiting Approval';
-      message = `Your top-up request for ${amountText} has been submitted. We are verifying your receipt. This usually takes 1-24 hours.`;
+      message = `Your recharge balance request for ${amountText} has been submitted. We are verifying your receipt.`;
   }
 
   return (
@@ -111,13 +111,7 @@ export default function TransactionStatusScreen() {
                 const data = snapshot.data();
                 const newStatus = (data.status as 'pending' | 'succeeded' | 'denied');
 
-                if (newStatus !== currentStatus && newStatus !== 'pending') {
-                    setSnackbar({ 
-                        visible: true, 
-                        message: `Transaction ${newStatus.toUpperCase()}!`, 
-                        isError: newStatus === 'denied' 
-                    });
-                }
+                // ⭐ REMOVED: The logic that showed the "Transaction SUCCEEDED!" snackbar
                 
                 setCurrentStatus(newStatus);
                 setTxnAmount(data.amount || initialAmount);
@@ -179,13 +173,15 @@ export default function TransactionStatusScreen() {
                     style={styles.button}
                     buttonColor={theme.colors.primary}
                     textColor={theme.colors.onPrimary}
+                    // ⭐ ADDED: Disable button if pending
+                    disabled={currentStatus === 'pending'}
                 >
                     Return to Home
                 </Button>
 
             </SafeAreaView>
             
-            {/* Universal Snackbar */}
+            {/* Universal Snackbar (Kept for errors like "Record not found", but removed for status updates) */}
             <Snackbar
                 visible={snackbar.visible}
                 onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
