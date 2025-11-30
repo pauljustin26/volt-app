@@ -3,15 +3,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot, query, where, getDoc, Unsubscribe } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Card, IconButton, Text, useTheme } from "react-native-paper";
+import React, { useEffect, useState, useRef } from "react";
+import { Image, ScrollView, StyleSheet, View, Alert } from "react-native";
+import { ActivityIndicator, Button, Card, IconButton, Text, useTheme, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../../config/firebaseConfig";
 import { useAppTheme } from "../_layout";
-// import * as Notifications from "expo-notifications";
-// import Constants from "expo-constants";
-// import { Platform } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -24,60 +22,102 @@ export default function HomeScreen() {
   const [currentRental, setCurrentRental] = useState<any | null>(null);
   const [tick, setTick] = useState(0);
 
+  // Track if we have already alerted the user for the current rental session
+  const alertShownRef = useRef(false);
+  const lastAlertedStatusRef = useRef<string | null>(null);
+  const currentRentalIdRef = useRef<string | null>(null);
+
+  // Constants
+  const GRACE_PERIOD_MINS = 5;
+
   // Re-render every second for countdown
   useEffect(() => {
     const interval = setInterval(() => setTick(prev => prev + 1), 1000);
     return () => clearInterval(interval);
   }, []);
 
+    // --- FOCUS EFFECT: Reset alert state when user returns to this screen ---
+  useFocusEffect(
+    React.useCallback(() => {
+      // Setting this to null ensures that if the user navigates away and comes back,
+      // the alert for the CURRENT status will fire again immediately.
+      lastAlertedStatusRef.current = null;
+    }, [])
+  );
+
   const [remainingTime, setRemainingTime] = useState("0m 0s");
   const [usedTime, setUsedTime] = useState("0m");
+  const [rentalStatus, setRentalStatus] = useState<'active' | 'overdue' | 'penalty'>('active');
 
-  useEffect(() => {
-    if (currentRental) {
-      setRemainingTime(calculateRemainingTime(currentRental.startTime, currentRental.duration));
-      setUsedTime(calculateUsedTime(currentRental.startTime));
-    }
-  }, [tick, currentRental]);
-  
   const parseStartTime = (startTime: any) => {
-    if (!startTime) return new Date(); // fallback
-    // Firestore Timestamp
+    if (!startTime) return new Date(); 
     if (typeof startTime?.toDate === "function") return startTime.toDate();
-    // Already Date object
     if (startTime instanceof Date) return startTime;
-    // String timestamp
     return new Date(startTime);
   };
 
-  const calculateRemainingTime = (startTime: any, duration: number) => {
-    const start = parseStartTime(startTime);
-    if (!duration) return "0m";
+  useEffect(() => {
+    if (currentRental) {
+      // 1. Reset alert ref if rental ID changes (new rental)
+      if (currentRentalIdRef.current !== currentRental.id) {
+        currentRentalIdRef.current = currentRental.id;
+        alertShownRef.current = false;
+      }
 
-    const end = new Date(start.getTime() + duration * 60000);
-    const now = new Date();
+      const start = parseStartTime(currentRental.startTime);
+      const now = new Date();
+      const durationMs = currentRental.duration * 60000;
+      const graceMs = GRACE_PERIOD_MINS * 60000;
+      const elapsedMs = now.getTime() - start.getTime();
 
-    const diffMs = end.getTime() - now.getTime();
-    if (diffMs <= 0) return "Expired";
+      // --- CALCULATE STATUS ---
+      let status: 'active' | 'overdue' | 'penalty' = 'active';
+      if (elapsedMs > durationMs + graceMs) {
+        status = 'penalty';
+      } else if (elapsedMs > durationMs) {
+        status = 'overdue';
+      }
+      setRentalStatus(status);
 
-    const minutes = Math.floor(diffMs / 60000);
-    const seconds = Math.floor((diffMs % 60000) / 1000);
+      // --- CALCULATE TIMES ---
+      // Used Time: Always actual elapsed
+      const usedMins = Math.floor(elapsedMs / 60000);
+      const usedSecs = Math.floor((elapsedMs % 60000) / 1000);
+      setUsedTime(`${usedMins}m ${usedSecs}s`);
 
-    return `${minutes}m ${seconds}s`;
-  };
+      // Remaining Time: Caps at 0 if expired
+      const remainingMs = durationMs - elapsedMs;
+      if (remainingMs <= 0) {
+        setRemainingTime("0m 0s");
+      } else {
+        const remMins = Math.floor(remainingMs / 60000);
+        const remSecs = Math.floor((remainingMs % 60000) / 1000);
+        setRemainingTime(`${remMins}m ${remSecs}s`);
+      }
+      // --- HANDLE ALERT NOTICE ---
+      if (status !== lastAlertedStatusRef.current) {
+        if (status === 'overdue') {
+          Alert.alert(
+            "Rental Expired",
+            "Your rental duration has ended. Please return the device within the 5-minute grace period to avoid penalty fees.",
+            [{ text: "I'll Return It" }]
+          );
+          lastAlertedStatusRef.current = status;
+        } 
+        else if (status === 'penalty') {
+          Alert.alert(
+            "⚠️ Penalty Fee Active",
+            "Grace period exceeded. A penalty of ₱5.00 per minute is now being deducted from your wallet. Please return the device immediately.",
+            [{ text: "I Understand", style: "destructive" }]
+          );
+          lastAlertedStatusRef.current = status;
+        }
+      }
 
-  const calculateUsedTime = (startTime: any) => {
-    const start = parseStartTime(startTime);
-    const now = new Date();
+    }
+  }, [tick, currentRental]);
 
-    const diffMs = now.getTime() - start.getTime();
-    const usedMinutes = Math.floor(diffMs / 60000);
-
-    return `${usedMinutes}m`;
-  };
-
-
-  // Main auth & user data initialization/routing listener
+  // Main auth & user data initialization
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -86,7 +126,6 @@ export default function HomeScreen() {
         return;
       }
 
-      // Fetch user name once (GET DOC - no cleanup needed)
       const userDocRef = doc(db, "users", user.uid);
       getDoc(userDocRef).then(userDoc => {
         if (userDoc.exists()) {
@@ -101,14 +140,13 @@ export default function HomeScreen() {
     return () => unsubscribeAuth();
   }, []);
 
-  // Dedicated useEffect for Firestore Real-time Listeners
+  // Firestore Real-time Listeners
   useEffect(() => {
     const user = auth.currentUser;
     let unsubscribeWallet: Unsubscribe = () => {};
     let unsubRental: Unsubscribe = () => {};
 
     if (user) {
-      // Listen to wallet balance in real-time
       const walletDocRef = doc(db, "users", user.uid, "wallet", "balance");
       unsubscribeWallet = onSnapshot(walletDocRef, (walletSnap) => {
         if (walletSnap.exists()) {
@@ -117,12 +155,9 @@ export default function HomeScreen() {
           setWalletBalance(0);
         }
       }, (error) => {
-          // Handle permission denied on logout
           if (error.code === 'permission-denied') setWalletBalance(0);
-          console.error("Wallet listener error:", error.message);
       });
 
-      // Listen to current rentals in real-time
       const rentalQuery = query(
         collection(db, "volts"),
         where("studentUID", "==", user.uid),
@@ -135,19 +170,16 @@ export default function HomeScreen() {
           setCurrentRental(null);
         }
       }, (error) => {
-          // Handle permission denied on logout
           if (error.code === 'permission-denied') setCurrentRental(null);
-          console.error("Rental listener error:", error.message);
       });
     }
 
-    // CRITICAL CLEANUP: Stop both listeners when the component unmounts.
     return () => {
       unsubscribeWallet();
       unsubRental();
     };
 
-  }, [auth.currentUser]); // Dependency ensures listener restarts/stops on login/logout
+  }, [auth.currentUser]);
 
 
   if (loading) {
@@ -181,7 +213,6 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Greeting */}
           <Text variant="headlineMedium" style={[styles.header, { color: theme.colors.primary }]}>
             Welcome, {userName}!
           </Text>
@@ -197,43 +228,92 @@ export default function HomeScreen() {
               <View style={{ alignItems: "flex-end" }}>
                 <Button
                   mode="contained"
-                  onPress={() => router.push("/wallet/recharge")} // replace with your top-up screen
+                  onPress={() => router.push("/wallet/recharge")}
                   icon={() => <Ionicons name="wallet" size={20} color={theme.colors.onSurface} />}
                   style={[styles.actionButton, { backgroundColor: theme.colors.secondary }]}
                 >
-                  <Text style={[styles.actionButton, { color: theme.colors.onSurface }]}>Recharge Balance</Text>
+                  <Text style={[styles.actionButtonText, { color: theme.colors.onSurface }]}>Recharge Balance</Text>
                 </Button>
               </View>
             </Card.Content>
           </Card>
 
-          {/* Current Rentals */}
-          <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary }]}>
+          {/* Current Rentals - UPDATED */}
+          <Card 
+            style={[
+              styles.card, 
+              // Change background color slightly if in penalty to draw attention
+              { backgroundColor: rentalStatus === 'penalty' ? theme.colors.errorContainer : theme.colors.onPrimary }
+            ]}
+          >
             <Card.Content>
-              <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>Current Rental(s)</Text>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.cardTitle, { color: rentalStatus === 'penalty' ? theme.colors.error : theme.colors.primary }]}>
+                  Current Rental(s)
+                </Text>
+                {/* Penalty Indicator Badge */}
+                {rentalStatus === 'penalty' && (
+                  <Chip icon="alert-circle" style={{ backgroundColor: theme.colors.error }} textStyle={{ color: 'white' }}>
+                    PENALTY ACTIVE
+                  </Chip>
+                )}
+              </View>
+
               {currentRental ? (
                 <View style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  backgroundColor: theme.colors.primary,
+                  backgroundColor: rentalStatus === 'penalty' ? theme.colors.error : theme.colors.primary,
                   borderRadius: 15,
                   paddingVertical: 12,
                   paddingHorizontal: 16,
                   marginTop: 10,
                 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <Ionicons name="flash" size={20} color={theme.colors.onPrimary} style={{ marginRight: 8 }} />
-                    <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold", fontSize: 16 }}>Volt {currentRental.id}</Text>
+                  <View style={styles.rowBetween}>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Ionicons name="flash" size={24} color={theme.colors.onPrimary} style={{ marginRight: 8 }} />
+                      <View>
+                        <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold", fontSize: 18 }}>Volt {currentRental.id}</Text>
+                        {/* Show allowed duration */}
+                        <Text style={{ color: theme.colors.onPrimary, fontSize: 12, opacity: 0.8 }}>
+                          Plan: {currentRental.duration} mins
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ alignItems: "flex-end" }}>
+                      {/* Used Time */}
+                      <Text style={{ color: theme.colors.onPrimary, fontSize: 12, opacity: 0.9 }}>
+                        Time Used
+                      </Text>
+                      <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold", fontSize: 16, marginBottom: 4 }}>
+                        {usedTime}
+                      </Text>
+
+                      {/* Remaining Time */}
+                      <Text style={{ color: theme.colors.onPrimary, fontSize: 12, opacity: 0.9 }}>
+                        {rentalStatus === 'active' ? "Time Left" : "Overdue"}
+                      </Text>
+                      <Text style={{ 
+                        fontWeight: "bold", 
+                        fontSize: 16,
+                        // Make text yellow if overdue/penalty to verify distinct from white
+                        color: rentalStatus !== 'active' ? '#FFEB3B' : theme.colors.onPrimary 
+                      }}>
+                        {remainingTime}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold", fontSize: 14 }}>
-                      Used: {usedTime}
-                    </Text>
-                    <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold", fontSize: 14 }}>
-                      Remaining: {remainingTime}
-                    </Text>
-                  </View>
+
+                  {/* Penalty Message inside the card */}
+                  {rentalStatus === 'penalty' && (
+                    <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.3)', paddingTop: 8 }}>
+                      <Text style={{ color: '#FFEB3B', fontWeight: 'bold', textAlign: 'center' }}>
+                        ⚠ Grace Period Exceeded! 
+                      </Text>
+                      <Text style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>
+                        Deducting ₱5.00 per minute late fee.
+                      </Text>
+                    </View>
+                  )}
                 </View>
               ) : (
                 <>
@@ -250,12 +330,14 @@ export default function HomeScreen() {
           <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary }]}>
             <Card.Content>
               <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>Reminders</Text>
-              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Powerbanks cannot be taken outside the designated vicinity area.</Text>
-              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Powerbanks have a built-in buzzer/alarm for security.</Text>
-              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Maximum usage: 3 hours per rental. Grace period: 5 minutes. for returning</Text>
-              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Late returns incur a penalty per 5 pesos minute.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Powerbanks must stay within the designated vicinity area of 8 meters.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Each powerbank is equipped with a built-in security alarm.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Maximum rental duration: 3 hours.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Grace period for return: 5 minutes.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Late returns incur a penalty 5 pesos per minute.</Text>
               <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Lost or unreturned powerbanks will incur the full replacement fee.</Text>
-              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Minimum wallet balance: ₱100. No refunds.</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Minimum wallet balance required: ₱100</Text>
+              <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>• Strictly no refunds.</Text>
             </Card.Content>
           </Card>
           <View style={{ height: 100 }} />
@@ -274,15 +356,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 30,
+    marginBottom: 10,
   },
   logoInline: { width: 50, height: 50 },
   scrollContent: { padding: 20 },
-  header: { fontSize: 40 ,marginBottom: 40, fontWeight: "bold" },
+  header: { fontSize: 32, marginBottom: 30, fontWeight: "bold" },
   card: {
     borderRadius: 15,
     marginBottom: 20,
-    paddingVertical: 10,
+    paddingVertical: 5,
     elevation: 3,
   },
   cardTitle: {
@@ -298,10 +380,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginVertical: 4,
   },
-  cardText: {
-    fontSize: 15,
-    marginVertical: 2,
-  },
   rowBetween: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -311,4 +389,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginTop: 10,
   },
+  actionButtonText: {
+    fontWeight: "600",
+  }
 });

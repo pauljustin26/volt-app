@@ -1,6 +1,5 @@
 // app/(auth)/login.tsx
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import {
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -32,13 +31,12 @@ import {
   useTheme,
 } from "react-native-paper";
 import { auth } from "../../config/firebaseConfig";
-import { useAppTheme } from "../_layout";
 
 export default function Login() {
   const theme = useTheme();
-  const { isDark, toggleTheme } = useAppTheme();
   const router = useRouter();
 
+  // --- Form State ---
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState("");
   const [password, setPassword] = useState("");
@@ -47,15 +45,41 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // --- Forgot Password State ---
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotError, setForgotError] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
   const forgotAnim = useState(new Animated.Value(0))[0];
-  const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
+
+  // --- Snackbar State (The "Fancy" Alternative to Alerts) ---
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarColor, setSnackbarColor] = useState(theme.colors.primary);
 
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
   
+  // --- Helper: Show Fancy Message ---
+  const showMessage = (message: string, isError: boolean = true) => {
+    setSnackbarMessage(message);
+    setSnackbarColor(isError ? theme.colors.error : theme.colors.primary);
+    setSnackbarVisible(true);
+  };
+
+  const getFriendlyErrorMessage = (code: string) => {
+    switch (code) {
+      case "auth/invalid-email": return "Invalid email format.";
+      case "auth/user-disabled": return "This account has been disabled.";
+      case "auth/wrong-password":
+      case "auth/invalid-credential":
+      case "auth/user-not-found": return "Incorrect email or password.";
+      case "auth/too-many-requests": return "Too many attempts. Please wait a moment.";
+      case "auth/network-request-failed": return "Network connection failed.";
+      default: return "Something went wrong. Please try again.";
+    }
+  };
+
+  // --- Effects ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -71,9 +95,10 @@ export default function Login() {
 
           router.replace("/(tabs)");
         } catch (err) {
-          console.log("Auto-login failed, signing out:", err);
-          await signOut(auth); // clear Firebase session
+          // REPLACED CONSOLE LOG: Show user that session is invalid
+          await signOut(auth); 
           setCheckingAuth(false);
+          showMessage("Session expired. Please login again.", true);
         }
       } else {
         setCheckingAuth(false);
@@ -83,22 +108,7 @@ export default function Login() {
     return unsubscribe;
   }, []);
 
-
-  const friendlyError = (code: string) => {
-    switch (code) {
-      case "auth/invalid-email":
-        return "Invalid email format.";
-      case "auth/wrong-password":
-      case "auth/invalid-credential":
-      case "auth/user-not-found":
-        return "Invalid email or password.";
-      case "auth/too-many-requests":
-        return "Too many login attempts. Try again later.";
-      default:
-        return "Something went wrong. Please try again.";
-    }
-  };
-
+  // --- Handlers ---
   const handleLogin = async () => {
     let valid = true;
     if (!email.trim()) { setEmailError("Email is required"); valid = false; }
@@ -117,12 +127,9 @@ export default function Login() {
       // 2️⃣ Check if email verified
       if (!user.emailVerified) {
         await signOut(auth); // immediately log out
-        alert(
-          "Your email is not verified. Please check your inbox for the verification link."
-        );
-
-        // Optional: Ask if user wants to resend verification email
-        // import { Alert } from "react-native" if not imported yet
+        
+        // Note: We keep Alert here specifically because we need the "Resend" button action,
+        // which Snackbar doesn't handle as easily for complex flows.
         Alert.alert(
           "Email not verified",
           "Please verify your email to continue.",
@@ -130,15 +137,18 @@ export default function Login() {
             {
               text: "Resend Verification",
               onPress: async () => {
-                await sendEmailVerification(user);
-                alert("Verification email sent again. Please check your inbox.");
+                try {
+                  await sendEmailVerification(user);
+                  showMessage("Verification email sent! Check your inbox.", false);
+                } catch (e: any) {
+                  showMessage(getFriendlyErrorMessage(e.code), true);
+                }
               },
             },
             { text: "OK" },
           ]
         );
-
-        return; // stop further login
+        return; 
       }
 
       // 3️⃣ If verified, get token
@@ -154,37 +164,43 @@ export default function Login() {
         throw new Error("Backend unavailable or unauthorized");
       }
 
-      // 5️⃣ Success → go to home/tabs
+      // 5️⃣ Success
       router.replace("/(tabs)");
     } catch (e: any) {
-      console.error(e);
-      const msg = e.message || "Login failed";
-      alert(msg);
+      // REPLACED CONSOLE ERROR: Use Snackbar
+      const msg = e.code ? getFriendlyErrorMessage(e.code) : (e.message || "Login failed");
+      showMessage(msg, true);
     } finally {
       setLoading(false);
     }
   };
 
-
   const handleForgotPassword = async () => {
     if (!forgotEmail.trim()) {
-      setForgotError("Please enter your email to reset password");
+      // REPLACED INLINE ERROR: Use Snackbar
+      showMessage("Please enter your email to reset password", true);
       return;
     }
     if (!/\S+@\S+\.\S+/.test(forgotEmail)) {
-      setForgotError("Enter a valid email address");
+      // REPLACED INLINE ERROR: Use Snackbar
+      showMessage("Enter a valid email address", true);
       return;
     }
 
     setForgotLoading(true);
     try {
       await sendPasswordResetEmail(auth, forgotEmail);
-      setForgotError("");
+      // setForgotError(""); // No longer needed
       setForgotEmail("");
       setForgotOpen(false);
-      setSnackbarVisible(true);
+      
+      // REPLACED STATE: Use Helper
+      showMessage("Password reset link sent! Check your inbox.", false);
     } catch (e: any) {
-      setForgotError(friendlyError(e.code ?? ""));
+      // REPLACED CONSOLE/STATE: Use Helper
+      const msg = getFriendlyErrorMessage(e.code ?? "");
+      // setForgotError(msg); // Removed inline error since we are using Snackbar
+      showMessage(msg, true); // Show snackbar for visibility
     } finally {
       setForgotLoading(false);
     }
@@ -220,15 +236,8 @@ export default function Login() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.inner}>
-            <IconButton
-              icon={() => (
-                <Ionicons name={isDark ? "sunny-outline" : "moon-outline"} size={28} color={theme.colors.primary} />
-              )}
-              onPress={toggleTheme}
-              style={{ display: "flex", alignItems: "center" }}
-            />
             <Image
-              source={isDark ? require("../../assets/images/white-logo.png") : require("../../assets/images/blue-logo.png")}
+              source={require("../../assets/images/white-logo.png")}
               resizeMode="contain"
               style={styles.logo}
             />
@@ -241,7 +250,6 @@ export default function Login() {
                 placeholder="Email"
                 value={email}
                 onChangeText={(text) => {
-                  // Prevent adding the domain manually
                   const clean = text.replace(/@.*/, "");
                   setEmail(clean);
                   if (emailError) setEmailError("");
@@ -287,7 +295,7 @@ export default function Login() {
               {forgotOpen && (
                 <View style={styles.forgotContainer}>
                   <TextInput
-                    label="Enter your email"
+                    placeholder="Enter your email"
                     value={forgotEmail}
                     editable={!forgotLoading}
                     onChangeText={(t) => { setForgotEmail(t); if (forgotError) setForgotError(""); }}
@@ -316,9 +324,28 @@ export default function Login() {
           </View>
         </ScrollView>
 
-        <Snackbar visible={snackbarVisible} onDismiss={() => setSnackbarVisible(false)} duration={4000} style={{ backgroundColor: theme.colors.primary }}>
-          Password reset link sent! Check your inbox.
+        {/* --- Fancy Snackbar Component --- */}
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          style={{ 
+            backgroundColor: snackbarColor, 
+            borderRadius: 10, 
+            margin: 16,
+            marginBottom: 20
+          }}
+          action={{
+            label: 'Close',
+            onPress: () => setSnackbarVisible(false),
+            textColor: theme.colors.onPrimary,
+          }}
+        >
+          <Text style={{ color: theme.colors.onPrimary, fontWeight: 'bold' }}>
+            {snackbarMessage}
+          </Text>
         </Snackbar>
+
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -328,7 +355,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  keyboardView: { // Add this new style
+  keyboardView: {
     flex: 1,
   },
   loaderContainer: {
@@ -366,7 +393,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#ccc",
   },
-
   input: {
     marginBottom: 10,
   },

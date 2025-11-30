@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { StyleSheet, Image, View, TouchableOpacity, Share, ScrollView } from "react-native";
+import { StyleSheet, Image, View, TouchableOpacity, Share, ScrollView, Linking, Platform, Modal } from "react-native"; // ⭐ Added Modal
 import { SafeAreaView } from "react-native-safe-area-context";
 import { 
   Text, 
@@ -8,7 +8,9 @@ import {
   Card, 
   useTheme, 
   ActivityIndicator, 
-  Snackbar 
+  Snackbar,
+  Divider,
+  SegmentedButtons
 } from "react-native-paper";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -35,6 +37,10 @@ const STATUS_COLORS = {
 export default function RechargeGcashScreen() {
   const router = useRouter();
   const theme = useTheme();
+  
+  // Modes: 'online' (PayMongo) or 'manual' (QR Upload)
+  const [mode, setMode] = useState<"manual" | "online">("manual");
+  
   const [amount, setAmount] = useState("");
   const [receipt, setReceipt] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -42,6 +48,9 @@ export default function RechargeGcashScreen() {
 
   const [latestTxn, setLatestTxn] = useState<any | null>(null);
   const [snackbar, setSnackbar] = useState({ visible: false, message: '', isError: false });
+  
+  // ⭐ Lightbox State
+  const [lightboxVisible, setLightboxVisible] = useState(false);
 
   const authInstance = getAuth();
   const user = authInstance.currentUser;
@@ -50,11 +59,13 @@ export default function RechargeGcashScreen() {
     let unsubscribe: Unsubscribe = () => {};
     
     if (user) {
+        // Only track manual pending transactions for blocking
         const q = query(
             collection(db, "transactions"),
             where("userId", "==", user.uid),
             where("type", "==", "topup"),
             where("status", "==", "pending"),
+            where("method", "in", ["gcash_manual", "maya_manual"]), // Only block manual ones
             orderBy("createdAt", "desc")
         );
 
@@ -66,10 +77,8 @@ export default function RechargeGcashScreen() {
                 setLatestTxn(null);
             }
         }, (error) => {
-            console.error("Pending transaction listener error:", error);
+            // Ignore index errors if query just changed
         });
-    } else {
-        setLatestTxn(null);
     }
 
     return () => unsubscribe();
@@ -79,6 +88,35 @@ export default function RechargeGcashScreen() {
     setSnackbar({ visible: true, message, isError });
   };
 
+  // --- ONLINE PAYMENT (PayMongo) ---
+  const handlePayMongo = async () => {
+    const amountValue = parseFloat(amount);
+    if (!amountValue || amountValue < 100) return showAlert("Minimum recharge is ₱100.00", true);
+
+    setLoading(true);
+    try {
+        const token = await user?.getIdToken();
+        const res = await axios.post(
+            `${API_URL}/wallet/topup-online`,
+            { amount: amountValue },
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        // Open checkout URL
+        if (res.data.checkoutUrl) {
+            await Linking.openURL(res.data.checkoutUrl);
+            // Optionally redirect user to a "Waiting for payment" screen or just reset
+            setAmount("");
+        }
+    } catch (err: any) {
+        console.error(err);
+        showAlert("Failed to initialize online payment.", true);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // --- MANUAL PAYMENT ---
   const pickReceipt = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return showAlert("Permission required to pick image", true);
@@ -98,8 +136,8 @@ export default function RechargeGcashScreen() {
 
   const handleUpload = async () => {
     const amountValue = parseFloat(amount);
-    if (!amountValue || amountValue <= 0) return showAlert("Please enter a valid amount (e.g., 100.00).", true);
-    if (!receipt) return showAlert("Please select the payment receipt image.", true);
+    if (!amountValue || amountValue <= 0) return showAlert("Please enter a valid amount.", true);
+    if (!receipt) return showAlert("Please select the receipt image.", true);
     
     if (latestTxn) {
         return router.push({
@@ -111,22 +149,29 @@ export default function RechargeGcashScreen() {
     setLoading(true);
 
     try {
-      if (!user) throw new Error("Login first");
-
-      const token = await user.getIdToken();
-
+      const token = await user?.getIdToken();
       const formData = new FormData();
       formData.append("amount", amountValue.toString());
-      formData.append("userUID", user.uid);
-      formData.append("method", `${paymentMethod}-manual`);
+      formData.append("userUID", user?.uid || "");
+      formData.append("method", paymentMethod); // "gcash" or "maya"
       
-      const fileType = receipt.type === 'image' ? 'image/jpeg' : 'application/octet-stream';
+      const fileName = receipt.fileName || `receipt_${Date.now()}.jpg`;
 
-      formData.append("receipt", {
-        uri: receipt.uri,
-        name: receipt.fileName || `receipt_${Date.now()}.jpg`,
-        type: fileType,
-      } as any);
+      // ⭐ FIX: Platform-specific file handling
+      if (Platform.OS === 'web') {
+        // Web: Convert URI to Blob
+        const res = await fetch(receipt.uri);
+        const blob = await res.blob();
+        formData.append("receipt", blob, fileName);
+      } else {
+        // Mobile: Use JSON object
+        const fileType = receipt.type === 'image' ? 'image/jpeg' : 'application/octet-stream';
+        formData.append("receipt", {
+          uri: receipt.uri,
+          name: fileName,
+          type: fileType,
+        } as any);
+      }
 
       const response = await axios.post(`${API_URL}/wallet/upload`, formData, {
         headers: {
@@ -135,34 +180,36 @@ export default function RechargeGcashScreen() {
         },
       });
 
-      const { transactionId, amount } = response.data;
+      const { transactionId, amount: resAmount } = response.data;
 
       router.replace({
         pathname: "/wallet/status",
-        params: { txnId: transactionId, status: 'pending', amount: amount.toString() }
+        params: { txnId: transactionId, status: 'pending', amount: resAmount.toString() }
       });
 
     } catch (err: any) {
       console.error(err);
-      showAlert(err?.response?.data?.message || err.message || "Submission failed. Please try again.", true);
+      const msg = err?.response?.data?.message || err.message || "Submission failed. Please try again.";
+      showAlert(msg, true);
     } finally {
       setLoading(false);
     }
   };
 
   const downloadQR = async () => {
+    // Only works on mobile
+    if (Platform.OS === 'web') {
+       showAlert("Please save the image manually on web.", false);
+       return;
+    }
+    
     const url = Image.resolveAssetSource(QR_IMAGES[paymentMethod]).uri;
     try {
       await Share.share({
         url,
-        message: `Scan this QR to pay via ${paymentMethod.toUpperCase()}. Save this image to your phone's gallery.`,
-        title: `${paymentMethod.toUpperCase()} QR`,
+        message: `Scan this QR to pay.`,
       });
-      showAlert(`QR code opened in share menu. Please select "Save/Download" if available.`, false);
-    } catch (err) {
-      console.error("Share failed", err);
-      showAlert("Failed to share QR code.", true);
-    }
+    } catch (err) {}
   };
   
   const isFormDisabled = loading || !!latestTxn;
@@ -175,143 +222,164 @@ export default function RechargeGcashScreen() {
       end={{ x: 0, y: 1 }}
     >
       <SafeAreaView style={{ flex: 1, paddingHorizontal: 20 }}>
-        
-        {/* --- NEW HEADER SECTION STARTS HERE --- */}
-        <View style={styles.headerContainer}>
-            <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={28} color="#fff" />
-            </TouchableOpacity>
-            
-            <Text style={[styles.mainHeader, { color: "#fff" }]}>
-                Top-up Wallet
-            </Text>
-            
-            {/* Empty view to balance the flex layout and keep title centered */}
-            <View style={styles.headerSpacer} />
-        </View>
-        {/* --- NEW HEADER SECTION ENDS HERE --- */}
-
+        <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={28} color="#fff" />
+        </TouchableOpacity>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          
-          {!!latestTxn && (
-             <Card style={[styles.statusCardAlert, { borderColor: STATUS_COLORS.pending.color, backgroundColor: STATUS_COLORS.pending.background }]}>
+          <View style={styles.headerContainer}>
+              <Text style={[styles.mainHeader, { color: "#fff" }]}>Recharge Wallet</Text>
+              <View style={styles.headerSpacer} />
+          </View>
+          {/* Mode Switcher */}
+          <View style={styles.modeContainer}>
+             <SegmentedButtons
+                value={mode}
+                onValueChange={val => {
+                    setMode(val as "manual" | "online");
+                    setAmount(""); // Reset amount when switching
+                }}
+                buttons={[
+                  {
+                    value: 'manual',
+                    label: 'Manual',
+                    icon: 'file-upload',
+                    style: { backgroundColor: mode === 'manual' ? theme.colors.primary : theme.colors.onPrimary },
+                    checkedColor: theme.colors.onPrimary,
+                    uncheckedColor: theme.colors.primary
+                  },
+                  {
+                    value: 'online',
+                    label: 'Online',
+                    icon: 'earth',
+                    style: { backgroundColor: mode === 'online' ?theme.colors.primary : theme.colors.onPrimary },
+                    checkedColor: theme.colors.onPrimary,
+                    uncheckedColor: theme.colors.primary
+                  },
+                ]}
+                style={{ marginBottom: 20 }}
+              />
+          </View>
+
+          {/* Alert for Manual Pending */}
+          {mode === 'manual' && !!latestTxn && (
+             <Card style={[styles.statusCardAlert, { borderColor: STATUS_COLORS.pending.color, backgroundColor: STATUS_COLORS.pending.background, marginBottom: 20 }]}>
                 <Card.Content style={styles.statusContentAlert}>
                     <Ionicons name="alert-circle-outline" size={24} color={STATUS_COLORS.pending.color} style={{ marginRight: 15 }} />
                     <View style={{ flex: 1 }}>
-                        <Text style={{ color: STATUS_COLORS.pending.color, fontWeight: 'bold' }}>
-                            PENDING TRANSACTION
-                        </Text>
-                        <Text style={{ color: theme.colors.onSurface, fontSize: 13, marginTop: 2 }}>
-                            You have a transaction of ₱{latestTxn.amount.toFixed(2)} awaiting admin approval.
+                        <Text style={{ color: STATUS_COLORS.pending.color, fontWeight: 'bold' }}>PENDING</Text>
+                        <Text style={{ color: theme.colors.onSurface, fontSize: 13 }}>Wait for admin approval.</Text>
+                    </View>
+                </Card.Content>
+            </Card>
+          )}
+
+          {/* -------------- MANUAL MODE UI -------------- */}
+          {mode === 'manual' ? (
+            <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary, opacity: isFormDisabled ? 0.6 : 1 }]}>
+                <Card.Content>
+                <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>1. Select Wallet</Text>
+                
+                <View style={styles.segmentedControlContainer}>
+                    <TouchableOpacity
+                    onPress={() => setPaymentMethod('gcash')}
+                    style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'gcash' ? theme.colors.primary : theme.colors.onPrimary }]}
+                    disabled={isFormDisabled}
+                    >
+                    <Text style={[styles.segmentText, { color: paymentMethod === 'gcash' ? theme.colors.onPrimary : theme.colors.primary }]}>GCash</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                    onPress={() => setPaymentMethod('maya')}
+                    style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'maya' ? theme.colors.primary : theme.colors.onPrimary }]}
+                    disabled={isFormDisabled}
+                    >
+                    <Text style={[styles.segmentText, { color: paymentMethod === 'maya' ? theme.colors.onPrimary : theme.colors.primary }]}>Maya</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 20 }]}>2. Scan & Pay</Text>
+                
+                {/* ⭐ Lightbox Trigger */}
+                <TouchableOpacity 
+                    onPress={() => setLightboxVisible(true)} 
+                    style={styles.qrContainer} 
+                    disabled={isFormDisabled}
+                >
+                    <Image source={QR_IMAGES[paymentMethod]} style={styles.qr} resizeMode="contain" />
+                    <Text style={{ textAlign: "center", marginTop: 5, color: theme.colors.primary, fontSize: 12 }}>
+                        Tap to expand & share
+                    </Text>
+                </TouchableOpacity>
+
+                <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 20 }]}>3. Upload Receipt</Text>
+                <TextInput
+                    placeholder="Amount (₱)"
+                    keyboardType="numeric"
+                    value={amount}
+                    onChangeText={setAmount}
+                    style={styles.input}
+                    disabled={isFormDisabled}
+                    mode="outlined"
+                    theme={{ colors: { primary: theme.colors.primary, background: "transparent" } }}
+                />
+                <Button
+                    mode="outlined"
+                    onPress={pickReceipt}
+                    style={styles.uploadButton}
+                    icon="cloud-upload"
+                    disabled={isFormDisabled}
+                >
+                    {receipt ? "Receipt Uploaded" : "Upload Receipt"}
+                </Button>
+                <Button
+                    mode="contained"
+                    onPress={handleUpload}
+                    loading={loading}
+                    disabled={isFormDisabled || !amount || !receipt}
+                    buttonColor={theme.colors.primary}
+                    textColor={theme.colors.onPrimary}
+                >
+                    Submit
+                </Button>
+                </Card.Content>
+            </Card>
+          ) : (
+            
+            /* -------------- ONLINE MODE UI -------------- */
+            <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary }]}>
+                <Card.Content>
+                    <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                        <Ionicons name="card-outline" size={60} color={theme.colors.primary} />
+                        <Text style={{ textAlign: 'center', marginTop: 10, color: theme.colors.onSurfaceVariant }}>
+                            Pay instantly using GCash, Maya, or Cards via PayMongo. Balance is updated automatically.
                         </Text>
                     </View>
+
+                    <TextInput
+                        label="Amount (₱)"
+                        placeholder="Min. 100.00"
+                        keyboardType="numeric"
+                        value={amount}
+                        onChangeText={setAmount}
+                        style={[styles.input, { marginBottom: 20 }]}
+                        mode="outlined"
+                        theme={{ colors: { primary: theme.colors.primary, background: "transparent" } }}
+                    />
+
                     <Button
                         mode="contained"
-                        onPress={() => router.push({
-                            pathname: "/wallet/status",
-                            params: { txnId: latestTxn.id, status: latestTxn.status, amount: latestTxn.amount.toString() }
-                        })}
-                        labelStyle={{ fontSize: 12 }}
-                        style={{ marginLeft: 10, backgroundColor: STATUS_COLORS.pending.color }}
+                        onPress={handlePayMongo}
+                        loading={loading}
+                        disabled={loading || !amount || parseFloat(amount) < 100}
+                        buttonColor={theme.colors.primary}
                         textColor={theme.colors.onPrimary}
+                        contentStyle={{ height: 50 }}
                     >
-                        View Status
+                        Pay Online
                     </Button>
                 </Card.Content>
             </Card>
           )}
 
-          <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary, opacity: isFormDisabled ? 0.6 : 1, marginTop: latestTxn ? 20 : 0 }]}>
-            <Card.Content>
-
-              <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>1. Select Payment Method</Text>
-
-              <View style={styles.segmentedControlContainer}>
-                <TouchableOpacity
-                  onPress={() => setPaymentMethod('gcash')}
-                  style={[
-                    styles.segmentedButton,
-                    { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'gcash' ? theme.colors.primary : theme.colors.surface },
-                  ]}
-                  disabled={isFormDisabled}
-                >
-                  <Text style={[styles.segmentText, { color: paymentMethod === 'gcash' ? theme.colors.onPrimary : theme.colors.primary }]}>
-                    GCash
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setPaymentMethod('maya')}
-                  style={[
-                    styles.segmentedButton,
-                    { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'maya' ? theme.colors.primary : theme.colors.surface },
-                  ]}
-                  disabled={isFormDisabled}
-                >
-                  <Text style={[styles.segmentText, { color: paymentMethod === 'maya' ? theme.colors.onPrimary : theme.colors.primary }]}>
-                    Maya
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 25 }]}>2. Scan QR Code</Text>
-
-              <TouchableOpacity 
-                onPress={downloadQR} 
-                style={styles.qrContainer}
-                disabled={isFormDisabled}
-              >
-                <Image
-                  source={QR_IMAGES[paymentMethod]}
-                  style={styles.qr}
-                  resizeMode="contain"
-                />
-                <Text style={{ textAlign: "center", marginTop: 5, color: theme.colors.primary, fontSize: 13 }}>
-                  Tap QR to share/save to gallery
-                </Text>
-              </TouchableOpacity>
-
-              <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 25 }]}>3. Enter Details & Upload Receipt</Text>
-
-              <TextInput
-                placeholder="Amount (₱)"
-                keyboardType="numeric"
-                value={amount}
-                onChangeText={setAmount}
-                style={styles.input}
-                disabled={isFormDisabled}
-                mode="outlined"
-                theme={{ colors: { primary: theme.colors.primary, background: "transparent" } }}
-              />
-
-              <Button
-                mode="outlined"
-                onPress={pickReceipt}
-                style={styles.uploadButton}
-                icon={({ color, size }) => (
-                    <Ionicons 
-                        name={receipt ? "cloud-done-outline" : "cloud-upload-outline"} 
-                        size={size} 
-                        color={color} 
-                    />
-                )}
-                disabled={isFormDisabled}
-              >
-                {receipt ? `Receipt: ${receipt.fileName.length > 30 ? receipt.fileName.substring(0, 27) + '...' : receipt.fileName}` : "Upload Payment Receipt"}
-              </Button>
-
-              <Button
-                mode="contained"
-                onPress={handleUpload}
-                loading={loading}
-                disabled={isFormDisabled || !amount || !receipt}
-                buttonColor={theme.colors.primary}
-                textColor={theme.colors.onPrimary}
-              >
-                {loading ? 'Submitting...' : 'Submit Top-up Request'}
-              </Button>
-            
-            </Card.Content>
-          </Card>
           <View style={{ height: 50 }} />
         </ScrollView>
       </SafeAreaView>
@@ -325,95 +393,112 @@ export default function RechargeGcashScreen() {
       >
         <Text style={{ color: theme.colors.onPrimary }}>{snackbar.message}</Text>
       </Snackbar>
+
+      {/* ⭐ Lightbox Modal */}
+      <Modal
+        visible={lightboxVisible}
+        transparent={true}
+        onRequestClose={() => setLightboxVisible(false)}
+        animationType="fade"
+      >
+        <View style={styles.lightboxOverlay}>
+          <TouchableOpacity style={styles.lightboxBackground} onPress={() => setLightboxVisible(false)} />
+          
+          <View style={styles.lightboxContent}>
+            <Image 
+                source={QR_IMAGES[paymentMethod]} 
+                style={styles.lightboxImage} 
+                resizeMode="contain" 
+            />
+            
+            <View style={styles.lightboxActions}>
+                <Button 
+                    mode="contained" 
+                    icon="share-variant" 
+                    onPress={downloadQR}
+                    buttonColor="#fff"
+                    textColor={theme.colors.onPrimary}
+                    style={{ marginBottom: 10, width: 200 }}
+                >
+                    Share QR
+                </Button>
+                
+                <Button 
+                    mode="text" 
+                    textColor="#fff" 
+                    onPress={() => setLightboxVisible(false)}
+                >
+                    Close
+                </Button>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  // --- NEW HEADER STYLES ---
   headerContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 20,
     marginTop: 10,
   },
   backButton: {
+    marginTop: 20,
+    marginBottom: -20,
     padding: 5,
     borderRadius: 20,
     width: 40, 
     alignItems: 'flex-start'
   },
-  headerSpacer: {
-    width: 40, // Should match backButton width to keep title centered
-  },
-  // -------------------------
-  scrollContent: { 
-    flexGrow: 1, 
-    paddingVertical: 10,
-  },
-  mainHeader: { 
-    fontSize: 24, // Slightly smaller to fit in row
-    fontWeight: "bold", 
-    textAlign: "center",
-  },
-  card: { 
-    borderRadius: 15, 
-    elevation: 5,
-  },
-  cardTitle: { 
-    fontSize: 16, 
-    fontWeight: "600", 
-    marginBottom: 10 
-  },
-  segmentedControlContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-    marginTop: 5,
-  },
-  segmentedButton: {
+  headerSpacer: { width: 40 },
+  scrollContent: { flexGrow: 1, paddingVertical: 10,justifyContent: "center" },
+  mainHeader: { fontSize: 24, fontWeight: "bold", textAlign: "center" },
+  card: { borderRadius: 15, elevation: 5 },
+  cardTitle: { fontSize: 16, fontWeight: "600", marginBottom: 10 },
+  segmentedControlContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 5 },
+  segmentedButton: { flex: 1, borderWidth: 1, borderRadius: 8, paddingVertical: 10, marginHorizontal: 5, alignItems: 'center' },
+  segmentText: { fontWeight: 'bold', fontSize: 16 },
+  qrContainer: { padding: 10, backgroundColor: 'white', borderRadius: 15, marginBottom: 10 },
+  qr: { width: "100%", height: 200, borderRadius: 12, alignSelf: "center" },
+  input: { marginBottom: 15, backgroundColor: "transparent" },
+  uploadButton: { marginBottom: 15 },
+  statusCardAlert: { borderRadius: 12, borderLeftWidth: 8, padding: 0, elevation: 3 },
+  statusContentAlert: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 15 },
+  modeContainer: { marginBottom: 5 },
+
+  // ⭐ Lightbox Styles
+  lightboxOverlay: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 10,
-    marginHorizontal: 5,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  segmentText: {
-    fontWeight: 'bold',
-    fontSize: 16,
+  lightboxBackground: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
-  qrContainer: {
-    padding: 10,
-    backgroundColor: 'white',
-    borderRadius: 15,
-    marginBottom: 10,
-  },
-  qr: { 
-    width: "100%", 
-    height: 200, 
-    borderRadius: 12, 
-    alignSelf: "center",
-  },
-  input: { 
-    marginBottom: 15, 
-    backgroundColor: "transparent",
-  },
-  uploadButton: {
-    marginBottom: 15,
-  },
-  statusCardAlert: {
-    borderRadius: 12,
-    borderLeftWidth: 8,
-    padding: 0,
-    elevation: 3,
-  },
-  statusContentAlert: {
-    flexDirection: 'row',
+  lightboxContent: {
+    width: '90%',
+    height: '70%',
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 15,
   },
+  lightboxImage: {
+    width: '100%',
+    height: '80%',
+    borderRadius: 10,
+  },
+  lightboxActions: {
+    marginTop: 20,
+    alignItems: 'center',
+    width: '100%',
+  }
 });

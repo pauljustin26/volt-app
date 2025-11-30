@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
-import Checkbox from "expo-checkbox";
+// Replaced expo-checkbox with react-native-paper Checkbox for the icon style
 import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   KeyboardAvoidingView,
@@ -10,14 +10,22 @@ import {
   StyleSheet,
   View,
   Image,
-  Alert,
   Linking
 } from "react-native";
-import { ActivityIndicator, Button, HelperText, Text, TextInput, useTheme, Snackbar } from "react-native-paper";
+import { 
+  ActivityIndicator, 
+  Button, 
+  HelperText, 
+  Text, 
+  TextInput, 
+  useTheme, 
+  Snackbar,
+  Checkbox // Imported from paper
+} from "react-native-paper";
 import { auth } from "../../config/firebaseConfig";
 import { useAppTheme } from "../_layout";
 
-// --- MOVED INTERFACES & VALIDATION HERE FOR CLARITY ---
+// --- INTERFACES & VALIDATION ---
 
 export interface SignupFormData {
   firstName: string;
@@ -26,7 +34,7 @@ export interface SignupFormData {
   password: string;
   confirmPassword: string;
   studentId: string;
-  mobileNumber: string; // Changed from optional to required
+  mobileNumber: string;
 }
 
 export interface ValidationErrors {
@@ -46,7 +54,6 @@ export const validateField = (
     case "lastName":
       return !value.trim() ? "Last name is required" : "";
     case "mobileNumber":
-        // Validates PH numbers: 09xxxxxxxxx or +639xxxxxxxxx
       if (!value.trim()) return "Mobile number is required";
       if (!/^(09|\+639)\d{9}$/.test(value.trim()))
         return "Invalid format (e.g., 09123456789)";
@@ -102,12 +109,25 @@ export default function Signup() {
   const theme = useTheme();
   const [agreed, setAgreed] = useState(false);
   
-  // New state for signup success snackbar
-  const [signupSuccessSnackbar, setSignupSuccessSnackbar] = useState(false);
+  // --- Snackbar State ---
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarColor, setSnackbarColor] = useState(theme.colors.primary);
 
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
   const { isDark } = useAppTheme();
+
+  // --- Helper: Show Fancy Message ---
+  const showMessage = (message: string, isError: boolean = true) => {
+    setSnackbarMessage(message);
+    setSnackbarColor(isError ? theme.colors.error : theme.colors.primary);
+    setSnackbarVisible(true);
+  };
+
+  // --- Computed: Check if all fields have values ---
+  const isAllFieldsFilled = useMemo(() => {
+    return Object.values(formData).every(val => val.trim() !== "");
+  }, [formData]);
 
   const handleBlur = (fieldName: keyof SignupFormData) => {
     setTouchedFields(prev => ({ ...prev, [fieldName]: true }));
@@ -140,18 +160,18 @@ export default function Signup() {
     const validationErrors = validateSignupForm(formData);
     if (!isFormValid(validationErrors)) {
       setErrors(validationErrors);
+      showMessage("Please correct the errors in the form.", true);
       return;
     }
 
     // 2. Check terms agreement
     if (!agreed) {
-      Alert.alert("Agreement Required", "Please agree to the Terms & Conditions to continue.");
+      showMessage("Please agree to the Terms & Conditions to continue.", true);
       return;
     }
 
     setLoading(true);
     setErrors({});
-    setSignupSuccessSnackbar(false);
 
     try {
       const fullEmail = `${formData.email.trim().toLowerCase()}@cvsu.edu.ph`;
@@ -191,7 +211,10 @@ export default function Signup() {
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           studentId: formData.studentId.trim(),
-          mobileNumber: formData.mobileNumber.trim(), // Added to backend payload
+          mobileNumber: formData.mobileNumber.trim(),
+          // Store terms agreement status and timestamp
+          termsAccepted: true,
+          termsAcceptedAt: new Date().toISOString(),
         }),
       });
 
@@ -200,22 +223,26 @@ export default function Signup() {
         throw new Error(data.message || "Failed to save user info.");
       }
 
-      // 7. Notify user using Snackbar instead of Alert.alert
-      setSignupSuccessSnackbar(true);
+      // 7. Notify user using Snackbar (Success)
+      showMessage("Registration complete! A verification link has been sent to your email.", false);
 
-      // 8. Log out until verified, navigate after the snackbar has had a chance to show
+      // 8. Log out until verified
       await auth.signOut();
+      
+      // Navigate after delay
       setTimeout(() => {
         router.replace("/login");
-      }, 3000); // 3 seconds delay to show the success message
+      }, 2500);
 
     } catch (err: any) {
       let message = err.message || "Signup failed. Please try again.";
       if (err.code === "auth/email-already-in-use") message = "This email is already registered.";
       else if (err.code === "auth/invalid-email") message = "Invalid email format.";
       else if (err.code === "auth/weak-password") message = "Password is too weak (min 6 characters).";
+      else if (err.code === "auth/network-request-failed") message = "Network error. Check your connection.";
 
-      setErrors({ submit: message });
+      setErrors(prev => ({ ...prev, submit: message }));
+      showMessage(message, true); // Show in Snackbar
     } finally {
       setLoading(false);
     }
@@ -314,7 +341,7 @@ export default function Signup() {
               </View>
             </View>
 
-            {/* Mobile Number - NEW FIELD */}
+            {/* Mobile Number */}
             <TextInput
               placeholder="Contact No."
               value={formData.mobileNumber}
@@ -332,7 +359,7 @@ export default function Signup() {
               {errors.mobileNumber}
             </HelperText>
 
-            {/* CvSU Email (username only input) */}
+            {/* CvSU Email */}
             <View style={styles.emailContainer}>
               <TextInput
                 placeholder="CvSU Username"
@@ -409,21 +436,22 @@ export default function Signup() {
               {errors.confirmPassword}
             </HelperText>
 
-            {/* Submit Errors */}
-            {errors.submit && (
-              <HelperText type="error" visible={true} style={{ textAlign: "center" }}>
-                {errors.submit}
-              </HelperText>
-            )}
-
-            {/* Terms & Conditions */}
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 12, marginBottom: 12, marginLeft: 6 }}>
-              <Checkbox value={agreed} onValueChange={setAgreed} color={agreed ? theme.colors.primary : undefined} />
-              <Text style={{ marginLeft: 8, flex: 1 }}>
+            {/* Terms & Conditions - Using Paper Checkbox for Icon Style */}
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, marginBottom: 12 }}>
+              <Checkbox
+                status={agreed ? 'checked' : 'unchecked'}
+                onPress={() => setAgreed(!agreed)}
+                color={theme.colors.primary}
+                uncheckedColor={theme.colors.onSurface}
+              />
+              <Text style={{ marginLeft: 2, flex: 1, color: theme.colors.onSurface }} onPress={() => setAgreed(!agreed)}>
                 I agree to the{" "}
                 <Text
                   style={{ color: theme.colors.primary, textDecorationLine: "underline" }}
-                  onPress={() => router.push("/terms")}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    router.push("/terms");
+                  }}
                 >
                   Terms & Conditions
                 </Text>
@@ -438,8 +466,9 @@ export default function Signup() {
                 <Button
                   mode="contained"
                   onPress={handleSignup}
-                  style={styles.button}
-                  disabled={loading}
+                  style={[styles.button, (!isAllFieldsFilled || !agreed) && { opacity: 0.6 }]}
+                  // Disable if: fields are empty OR terms not agreed OR loading
+                  disabled={!isAllFieldsFilled || !agreed || loading}
                   buttonColor={theme.colors.primary}
                   textColor={theme.colors.onPrimary}
                 >
@@ -461,9 +490,19 @@ export default function Signup() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Signup Success Snackbar (Replaces Alert) */}
-      <Snackbar visible={signupSuccessSnackbar} onDismiss={() => setSignupSuccessSnackbar(false)} duration={3000} style={{ backgroundColor: theme.colors.primary }}>
-        Registration complete! A verification link has been sent to your email.
+      {/* Unified Snackbar for Errors and Success */}
+      <Snackbar
+        visible={snackbarVisible}
+        onDismiss={() => setSnackbarVisible(false)}
+        duration={3000}
+        style={{ backgroundColor: snackbarColor, borderRadius: 10, marginBottom: 20 }}
+        action={{
+          label: 'Close',
+          onPress: () => setSnackbarVisible(false),
+          textColor: theme.colors.onPrimary,
+        }}
+      >
+        <Text style={{ color: theme.colors.onPrimary, fontWeight: 'bold' }}>{snackbarMessage}</Text>
       </Snackbar>
 
     </LinearGradient>

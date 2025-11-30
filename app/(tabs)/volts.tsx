@@ -79,6 +79,15 @@ export default function VoltsList() {
       return;
     }
 
+    // ⭐ 1. CHECK FOR EXISTING RENTAL LIMIT HERE
+    if (myRentals.length > 0) {
+      Alert.alert(
+        "Limit Reached", 
+        "You already have an active rental. Please return your current Volt before renting another one."
+      );
+      return;
+    }
+
     try {
       setReservingVoltId(volt.id);
 

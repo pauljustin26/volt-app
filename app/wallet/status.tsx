@@ -66,20 +66,6 @@ const StatusIndicator = ({ status, theme, amount, txnId }: { status: 'pending' |
                 <Text style={{ color: theme.colors.onSurface, fontSize: 14, textAlign: 'center', marginTop: 8 }}>
                     {message}
                 </Text>
-
-                <Text style={{ color: theme.colors.primary, fontSize: 12, marginTop: 15, opacity: 0.7 }}>
-                    Ref ID: {txnId.substring(0, 10)}...
-                </Text>
-
-                {isResolved && (
-                    <Button 
-                        mode="text" 
-                        onPress={() => alert('View history not implemented yet')}
-                        labelStyle={{ color: theme.colors.primary, fontSize: 13, marginTop: 10 }}
-                    >
-                        View Full History
-                    </Button>
-                )}
             </View>
         </Card.Content>
     </Card>
@@ -166,7 +152,7 @@ export default function TransactionStatusScreen() {
             <SafeAreaView style={styles.contentContainer}>
                 
                 <Text style={[styles.mainHeader, { color: theme.colors.primary, marginBottom: 40 }]}>
-                    Top-up Status Tracker
+                    Payment Status
                 </Text>
 
                 <StatusIndicator 
@@ -180,22 +166,11 @@ export default function TransactionStatusScreen() {
                     mode="contained"
                     onPress={() => router.replace('/')}
                     style={styles.button}
-                    buttonColor={theme.colors.secondary}
-                    textColor={theme.colors.onSecondary}
+                    buttonColor={theme.colors.primary}
+                    textColor={theme.colors.onPrimary}
                 >
                     Return to Home
                 </Button>
-
-                {currentStatus !== 'pending' && (
-                    <Button
-                        mode="text"
-                        onPress={() => router.replace('/wallet/recharge')}
-                        style={styles.textButton}
-                        textColor={theme.colors.primary}
-                    >
-                        Submit New Top-up Request
-                    </Button>
-                )}
 
             </SafeAreaView>
             

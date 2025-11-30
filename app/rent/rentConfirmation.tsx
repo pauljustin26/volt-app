@@ -1,11 +1,10 @@
 // app/rent/rentConfirmation.tsx
 import React, { useState, useEffect } from "react";
-import { View, StyleSheet, Dimensions, AppState, BackHandler } from "react-native";
+import { View, StyleSheet, Dimensions, AppState, BackHandler, TouchableOpacity } from "react-native";
 import {
   Button,
   Text,
   Card,
-  RadioButton,
   useTheme,
   ActivityIndicator,
   Snackbar,
@@ -28,7 +27,7 @@ export default function RentConfirmation() {
   const voltId = params.voltId as string;
   const EXPIRE_MINUTES = 1;
 
-  // ⭐ ADDED — Rent options
+  // Rent options
   const rentOptions = [
     { label: "30 mins", duration: 30, fee: 15 },
     { label: "1 hour", duration: 60, fee: 25 },
@@ -36,7 +35,7 @@ export default function RentConfirmation() {
     { label: "3 hours", duration: 180, fee: 60 },
   ];
 
-  // ⭐ ADDED — Default selection
+  // Default selection
   const [selectedOption, setSelectedOption] = useState(rentOptions[1]); // default 1 hour
 
   const [loading, setLoading] = useState(false);
@@ -47,7 +46,7 @@ export default function RentConfirmation() {
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
   
   // -------------------------------------------
-  // Release reservation (UNCHANGED)
+  // Release reservation
   // -------------------------------------------
   const releaseVolt = async () => {
     if (!expired && voltId) {
@@ -70,7 +69,7 @@ export default function RentConfirmation() {
   };
 
   // -------------------------------------------
-  // Countdown + expiration (UNCHANGED)
+  // Countdown + expiration
   // -------------------------------------------
   useEffect(() => {
     if (!voltId) return;
@@ -103,21 +102,19 @@ export default function RentConfirmation() {
 
     return () => clearInterval(interval);
   }, [voltId]);
-
+  // // -------------------------------------------
+  // // App background behavior (UNCHANGED)
+  // // -------------------------------------------
+  // useEffect(() => {
+  //   const subscription = AppState.addEventListener("change", async (state) => {
+  //     if ((state === "background" || state === "inactive") && !expired) {
+  //       await releaseVolt();
+  //     }
+  //   });
+  //   return () => subscription.remove();
+  // }, [expired]);
   // -------------------------------------------
-  // App background behavior (UNCHANGED)
-  // -------------------------------------------
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", async (state) => {
-      if ((state === "background" || state === "inactive") && !expired) {
-        await releaseVolt();
-      }
-    });
-    return () => subscription.remove();
-  }, [expired]);
-
-  // -------------------------------------------
-  // Back button (UNCHANGED)
+  // Back button
   // -------------------------------------------
   useFocusEffect(
     React.useCallback(() => {
@@ -131,7 +128,7 @@ export default function RentConfirmation() {
   );
 
   // -------------------------------------------
-  // Navigation away (UNCHANGED)
+  // Navigation away
   // -------------------------------------------
   useEffect(() => {
     const unsubscribe = navigation.addListener("beforeRemove", async () => {
@@ -141,7 +138,7 @@ export default function RentConfirmation() {
   }, []);
 
   // -------------------------------------------
-  // Confirm rent — ⭐ UPDATED to include selected option
+  // Confirm rent
   // -------------------------------------------
   const handleConfirm = async () => {
     if (!voltId) return;
@@ -157,8 +154,8 @@ export default function RentConfirmation() {
         },
         body: JSON.stringify({
           voltID: voltId,
-          fee: selectedOption.fee,        // ⭐ ADDED
-          duration: selectedOption.duration, // ⭐ ADDED
+          fee: selectedOption.fee,
+          duration: selectedOption.duration,
         }),
       });
 
@@ -170,16 +167,20 @@ export default function RentConfirmation() {
         params: { transactionId: data.transactionId },
       });
     } catch (err) {
-      console.error("Rent confirmation failed:", err);
       alert("Failed to confirm rent. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = ("0" + (seconds % 60)).slice(-2);
+    return `${mins}:${secs}`;
+  };
 
   // ------------------------------------------------------------
-  // UI (Almost unchanged — only added radio button selection)
+  // UI
   // ------------------------------------------------------------
   return (
     <LinearGradient
@@ -190,61 +191,92 @@ export default function RentConfirmation() {
     >
       <View style={styles.content}>
         <Text variant="headlineLarge" style={[styles.header, { color: theme.colors.primary }]}>
-          Confirm Your Rent
+          Confirm Rent Details
         </Text>
 
         <Card style={[styles.card, { width: screenWidth * 0.9, backgroundColor: theme.colors.onPrimary }]}>
           <Card.Content style={styles.cardContent}>
-            <Ionicons name="flash-outline" size={65} color={theme.colors.primary} />
-
-            {/* ⭐ ADDED — Rent Options */}
-            <View style={{ marginBottom: 10, width: "100%" }}>
-              <Text style={{ textAlign: "center", marginBottom: 10, fontWeight: "bold" }}>
-                Choose Rent Duration
-              </Text>
-
-              <RadioButton.Group
-                onValueChange={(value) =>
-                  setSelectedOption(rentOptions.find((o) => o.label === value)!)
-                }
-                value={selectedOption.label}
-              >
-                {rentOptions.map((opt) => (
-                  <View key={opt.label} style={{ flexDirection: "row", alignItems: "center", marginVertical: 2 }}>
-                    <RadioButton value={opt.label} />
-                    <Text>{opt.label}</Text>
-                  </View>
-                ))}
-              </RadioButton.Group>
+            
+            {/* Top Icon */}
+            <View style={styles.iconContainer}>
+               <Ionicons name="flash" size={48} color={theme.colors.primary} />
             </View>
 
-            {/* ⭐ UPDATED UI to show selected fee */}
-            <View style={styles.infoBox}>
-              <Text style={[styles.label, { color: theme.colors.primary }]}>Fee: </Text>
-              <Text style={[styles.label, { color: theme.colors.primary }]}>
-                ₱{selectedOption.fee} for {selectedOption.label}
+            {/* Rent Options UI */}
+            <View style={{ width: "100%", marginVertical: 10 }}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
+                Select Duration
               </Text>
+
+              {/* Custom Card List */}
+              <View style={styles.optionsContainer}>
+                {rentOptions.map((opt) => {
+                  const isSelected = selectedOption.label === opt.label;
+                  return (
+                    <TouchableOpacity
+                      key={opt.label}
+                      onPress={() => setSelectedOption(opt)}
+                      activeOpacity={0.7}
+                      style={[
+                        styles.optionCard,
+                        {
+                          // ⭐ Uses theme primary color for border/bg when selected
+                          borderColor: isSelected ? theme.colors.primary : 'transparent',
+                          backgroundColor: isSelected ? theme.colors.onPrimary : theme.colors.onPrimary, 
+                          borderWidth: isSelected ? 2 : 0,
+                        },
+                      ]}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                         {/* Replaces Radio Button with Icon */}
+                         <Ionicons 
+                            name={isSelected ? "radio-button-on" : "radio-button-off"} 
+                            size={22} 
+                            color={isSelected ? theme.colors.primary : theme.colors.onSurfaceVariant} 
+                            style={{ marginRight: 12 }}
+                         />
+                         <Text style={{
+                            fontSize: 16,
+                            fontWeight: isSelected ? "700" : "500",
+                            color: isSelected ? theme.colors.primary : theme.colors.onSurface
+                          }}>
+                            {opt.label}
+                          </Text>
+                      </View>
+
+                      <Text style={{
+                        fontSize: 16,
+                        fontWeight: "bold",
+                        color: isSelected ? theme.colors.primary : theme.colors.onSurface
+                      }}>
+                        ₱{opt.fee}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
 
-            {!expired && (
-              <Text style={{ fontSize: 16, marginTop: 10, color: theme.colors.primary }}>
-                Time left to confirm: {Math.floor(timeLeft / 60)}:
-                {("0" + (timeLeft % 60)).slice(-2)}s
-              </Text>
-            )}
+            {/* Total Fee Summary */}
+            <View style={styles.summaryContainer}>
+               <Text style={{ fontSize: 14, color: theme.colors.primary }}>Total Fee</Text>
+               <Text style={{ fontSize: 28, fontWeight: "800", color: theme.colors.primary }}>₱{selectedOption.fee}</Text>
+            </View>
 
             {loading ? (
-              <ActivityIndicator animating size="large" color={theme.colors.primary} />
+              <ActivityIndicator animating size="large" color={theme.colors.primary} style={{ marginTop: 20 }} />
             ) : (
               <Button
                 mode="contained"
                 onPress={handleConfirm}
                 style={styles.button}
+                contentStyle={{ height: 56 }}
                 labelStyle={styles.buttonLabel}
                 buttonColor={theme.colors.primary}
                 disabled={expired}
               >
-                Confirm Rent
+                {/* ⭐ Button Text Changed: Confirm (Timer) */}
+                Confirm ({expired ? "Expired" : formatTime(timeLeft)})
               </Button>
             )}
 
@@ -256,11 +288,9 @@ export default function RentConfirmation() {
               }}
               style={styles.backButton}
               labelStyle={styles.backButtonLabel}
-              icon={({ size, color }) => (
-                <Ionicons name="arrow-back" size={size} color={color} />
-              )}
+              textColor={theme.colors.primary}
             >
-              Go Back
+              Cancel
             </Button>
           </Card.Content>
         </Card>
@@ -270,7 +300,13 @@ export default function RentConfirmation() {
         visible={snackbarVisible}
         onDismiss={() => setSnackbarVisible(false)}
         duration={2000}
-        style={{ backgroundColor: theme.colors.primary }}
+        style={{ 
+          backgroundColor: theme.colors.primary,
+          alignSelf: "center", // ⭐ Fixes horizontal centering
+          marginBottom: 20,    // ⭐ Adds floating effect
+          borderRadius: 16,    // ⭐ Rounds corners
+          width: "90%",        // ⭐ Ensures correct width for centering
+        }}
         action={{ label: "OK", onPress: () => setSnackbarVisible(false) }}
       >
         Reservation expired. Returning to Volt selection...
@@ -279,18 +315,57 @@ export default function RentConfirmation() {
   );
 }
 
-
-// 🧱 STYLES (UNCHANGED)
+// 🧱 STYLES
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
-  header: { textAlign: "center", marginBottom: 25, fontWeight: "700" },
-  card: { borderRadius: 20, paddingVertical: 25, paddingHorizontal: 20, elevation: 6 },
-  cardContent: { alignItems: "center", gap: 18 },
-  infoBox: { alignItems: "center" },
-  label: { fontSize: 16, fontWeight: "bold" },
-  button: { borderRadius: 14, width: "85%", marginTop: 20 },
-  buttonLabel: { fontSize: 16, fontWeight: "600" },
-  backButton: { width: "85%" },
-  backButtonLabel: { fontSize: 15, fontWeight: "500" },
+  header: { textAlign: "center", marginBottom: 20, fontWeight: "800", fontSize: 26 },
+  card: { borderRadius: 28, paddingVertical: 10, elevation: 4, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8 },
+  cardContent: { alignItems: "center", paddingHorizontal: 16 },
+  
+  iconContainer: {
+    marginBottom: 10,
+    padding: 15,
+    borderRadius: 50,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+
+  sectionTitle: {
+    textAlign: "left",
+    marginBottom: 12,
+    fontWeight: "700",
+    fontSize: 16,
+    marginLeft: 4,
+    opacity: 0.8
+  },
+
+  optionsContainer: {
+    width: '100%',
+    gap: 10,
+  },
+  optionCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    width: '100%',
+  },
+
+  summaryContainer: { 
+    alignItems: "center", 
+    marginTop: 20, 
+    marginBottom: 15,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+    width: '100%',
+  },
+  
+  button: { borderRadius: 16, width: "100%", elevation: 2 },
+  buttonLabel: { fontSize: 18, fontWeight: "700", letterSpacing: 0.5 },
+  backButton: { width: "100%", marginTop: 8 },
+  backButtonLabel: { fontSize: 14, fontWeight: "600" },
   content: { flex: 1, justifyContent: "center", alignItems: "center" },
 });
+

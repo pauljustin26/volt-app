@@ -35,10 +35,7 @@ export default function ReturnConfirmation() {
         body: JSON.stringify({ voltID: voltId }),
       });
 
-      if (!res.ok) throw new Error(await res.text());
-
-      const data = await res.json();
-      console.log('Return confirmed', data.totalFee);
+      if (!res.ok) throw new Error(await res.text()); ``
       router.push('/return/returnSuccess');
     } catch (err) {
       console.error(err);

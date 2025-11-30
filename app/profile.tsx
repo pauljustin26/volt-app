@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, View, TextInput } from "react-native";
+import { StyleSheet, View, TextInput, TouchableOpacity } from "react-native";
 import {
   Avatar,
   Button,
@@ -10,7 +10,8 @@ import {
   Modal,
   Portal,
   ActivityIndicator,
-  Snackbar, // Import Snackbar
+  Snackbar, 
+  Surface,
 } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaContainer } from "../components/SafeAreaContainer";
@@ -21,6 +22,7 @@ import {
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import axios from "axios";
 
 // Directly define your backend API URL 
@@ -142,24 +144,10 @@ export default function ProfileScreen() {
     >
       <SafeAreaContainer style={{ flex: 1, backgroundColor: "transparent", padding: 20 }}>
         {/* Header */}
+                <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={28} color="#fff" />
+        </TouchableOpacity>
         <View style={styles.header}>
-          <Button
-            icon="arrow-left"
-            mode="text"
-            onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/");
-              }
-            }}
-            contentStyle={{ padding: 0 }}
-            style={styles.backButton}
-            textColor={theme.colors.primary}
-          >
-            {""}
-          </Button>
-
           <Avatar.Text
             size={72}
             label={
@@ -173,62 +161,72 @@ export default function ProfileScreen() {
           </Text>
           <Text style={{ color: theme.colors.primary }}>{userData?.email ?? ""}</Text>
 
-          <Text style={{ color: theme.colors.primary, marginTop: 4 }}>
-            Student ID: {userData?.studentId ?? "N/A"}
-          </Text>
-          <Text style={{ color: theme.colors.primary, marginTop: 2 }}>
-            Mobile: {userData?.mobileNumber ?? "N/A"}
-          </Text>
+            <View style={styles.infoBadgeContainer}>
+              <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                ID: {userData?.studentId ?? "N/A"}
+              </Text>
+              <Text style={{ color: theme.colors.primary, marginHorizontal: 8, opacity: 0.5 }}>|</Text>
+              <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                {userData?.mobileNumber ?? "No Mobile"}
+              </Text>
+            </View>
 
         </View>
 
-        <Divider style={{ marginVertical: 20, backgroundColor: theme.colors.primary }} />
 
         {/* Settings */}
         <List.Section>
-          <List.Subheader style={{ color: theme.colors.primary }}>Settings</List.Subheader>
+          <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Settings</List.Subheader>
           {/* Only keeping Reset Password */}
-          <List.Item
-            title="Reset Password"
-            description="Send password reset email"
-            titleStyle={{ color: theme.colors.primary }}
-            descriptionStyle={{ color: theme.colors.primary }}
-            left={(props) => <List.Icon {...props} icon="lock-reset" color={theme.colors.primary} />}
-            onPress={handleChangePassword}
-          />
+            <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
+              <List.Item
+                title="Reset Password"
+                description="Change your login password"
+                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+                left={(props) => <List.Icon {...props} icon="lock-reset" color={theme.colors.primary} />}
+                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+                onPress={handleChangePassword}
+                style={styles.listItem}
+              />
+            </Surface>
         </List.Section>
+            <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Others</List.Subheader>
+            <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
+              <List.Item
+                title="Help & Support"
+                description="FAQs and contact info"
+                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+                left={(props) => <List.Icon {...props} icon="help-circle-outline" color={theme.colors.primary} />}
+                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+                onPress={() => router.push("/faq")}
+                style={styles.listItem}
+              />
+              <Divider style={{ backgroundColor: theme.colors.primary, opacity: 0.1 }} />
+              <List.Item
+                title="Terms & Conditions"
+                description="Review policies"
+                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+                left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
+                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+                onPress={() => router.push("/terms")}
+                style={styles.listItem}
+              />
+            </Surface>
 
-        <Divider style={{ marginVertical: 20, backgroundColor: theme.colors.primary }} />
-
-        <List.Section>
-          <List.Subheader style={{ color: theme.colors.primary }}>Other</List.Subheader>
-          <List.Item
-            title="Help & Support"
-            description="FAQs and contact support"
-            titleStyle={{ color: theme.colors.primary }}
-            descriptionStyle={{ color: theme.colors.primary }}
-            left={(props) => <List.Icon {...props} icon="help-circle" color={theme.colors.primary} />}
-            onPress={() => showAlert("Support page coming soon!", false)}
-          />
-          <List.Item
-            title="Terms & Conditions"
-            description="Service and policies"
-            titleStyle={{ color: theme.colors.primary }}
-            descriptionStyle={{ color: theme.colors.primary }}
-            left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
-            onPress={() => router.push("/terms")}
-          />
-        </List.Section>
-
-        <Button
-          mode="contained"
-          onPress={handleLogout}
-          style={styles.logoutButton}
-          buttonColor={theme.colors.error}
-          textColor={theme.colors.onError}
-        >
-          Logout
-        </Button>
+          <Button
+            mode="outlined"
+            onPress={handleLogout}
+            icon="logout"
+            style={[styles.logoutButton, { borderColor: theme.colors.error }]}
+            textColor={theme.colors.error}
+            contentStyle={{ height: 50 }}
+            labelStyle={{ fontSize: 16, fontWeight: '600' }}
+          >
+            Log Out
+          </Button>
 
         <Portal>
           {/* -------------------------------------- */}
@@ -239,7 +237,7 @@ export default function ProfileScreen() {
             onDismiss={() => setPasswordModalVisible(false)}
             contentContainerStyle={[
               styles.modal,
-              { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary },
+              { backgroundColor: theme.colors.onPrimary, borderColor: theme.colors.primary },
             ]}
           >
             <Text
@@ -253,8 +251,16 @@ export default function ProfileScreen() {
             >
               Reset Password
             </Text>
-            <Text style={{ color: theme.colors.primary, marginBottom: 20, textAlign: "center" }}>
-              Send a password reset link to your email ({auth.currentUser?.email})?
+            <Text
+              style={{
+                color: theme.colors.primary,
+                marginBottom: 20,
+                textAlign: "center",
+              }}
+            >
+              Send a password reset link to your email:
+              {"\n"}
+              {auth.currentUser?.email}
             </Text>
 
             <Button
@@ -305,12 +311,16 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   backButton: {
-    position: "absolute",
-    left: 0,
-    top: 0,
+    marginLeft: 20,
+    marginTop: 20,
+    marginBottom: -20,
+    padding: 5,
+    borderRadius: 20,
+    width: 40, 
+    alignItems: 'flex-start'
   },
   name: { marginTop: 12, fontWeight: "bold" },
-  logoutButton: { marginTop: 30, borderRadius: 8, width: "50%", alignSelf: "center" },
+  logoutButton: { marginTop: 30, borderRadius: 8, width: "80%", alignSelf: "center" },
   modal: { 
     padding: 20, 
     marginHorizontal: 20, 
@@ -324,5 +334,25 @@ const styles = StyleSheet.create({
     paddingVertical: 8, 
     fontSize: 16,
     paddingHorizontal: 0,
+  },
+    infoBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)'
+  },
+  cardSurface: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    width: '90%',
+    alignSelf: 'center',
+  },
+  listItem: {
+    paddingVertical: 8
   },
 });
