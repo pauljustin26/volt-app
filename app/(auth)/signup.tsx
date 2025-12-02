@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 // Replaced expo-checkbox with react-native-paper Checkbox for the icon style
-import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { createUserWithEmailAndPassword } from "firebase/auth"; // Removed sendEmailVerification
 import React, { useState, useMemo } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -176,7 +176,8 @@ export default function Signup() {
     try {
       const fullEmail = `${formData.email.trim().toLowerCase()}@cvsu.edu.ph`;
 
-      // 3. Check if student ID is already registered
+      // 3. Check if student ID is valid AND already registered
+      // This call will fail if the student ID is not in the CSV list or if it's already used
       const checkRes = await fetch(`${API_URL}/auth/check-student`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -185,10 +186,12 @@ export default function Signup() {
 
       if (!checkRes.ok) {
         const data = await checkRes.json().catch(() => ({}));
-        throw new Error(data.message || "Student ID is already registered.");
+        // If this throws, we go to catch() block and DO NOT create Firebase user
+        throw new Error(data.message || "Student ID check failed.");
       }
 
       // 4. Create Firebase Auth user
+      // This only runs if the check above was successful
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         fullEmail,
@@ -196,10 +199,7 @@ export default function Signup() {
       );
       const user = userCredential.user;
 
-      // 5. Send verification email
-      await sendEmailVerification(user);
-
-      // 6. Save user info to backend
+      // 5. Send verification email & Save user info to backend
       const idToken = await user.getIdToken(true);
       const res = await fetch(`${API_URL}/auth/init`, {
         method: "POST",
@@ -223,10 +223,10 @@ export default function Signup() {
         throw new Error(data.message || "Failed to save user info.");
       }
 
-      // 7. Notify user using Snackbar (Success)
-      showMessage("Registration complete! A verification link has been sent to your email.", false);
+      // 6. Notify user using Snackbar (Success)
+      showMessage("Registration complete! A custom verification link has been sent to your email.", false);
 
-      // 8. Log out until verified
+      // 7. Log out until verified
       await auth.signOut();
       
       // Navigate after delay
@@ -359,10 +359,10 @@ export default function Signup() {
               {errors.mobileNumber}
             </HelperText>
 
-            {/* CvSU Email */}
-            <View style={styles.emailContainer}>
+            {/* CvSU Email - UPDATED WITH OVERLAY STYLE */}
+            <View style={{ position: "relative", width: "100%" }}>
               <TextInput
-                placeholder="CvSU Username"
+                placeholder="Email"
                 value={formData.email}
                 onChangeText={(text) => {
                   const clean = text.replace(/@.*/, "");
@@ -374,10 +374,21 @@ export default function Signup() {
                 error={!!errors.email && touchedFields.email}
                 onBlur={() => handleBlur("email")}
                 onFocus={() => handleFocus("email")}
-                style={{ flex: 1 }}
+                style={{ marginBottom: 0 }}
                 theme={commonInputTheme}
               />
-              <Text style={styles.emailSuffix}>@cvsu.edu.ph</Text>
+              <Text
+                style={{
+                  position: "absolute",
+                  right: 15,
+                  top: 20, 
+                  color: theme.colors.onSurface,
+                  opacity: 0.7,
+                  fontSize: 16,
+                }}
+              >
+                @cvsu.edu.ph
+              </Text>
             </View>
             <HelperText type="error" visible={!!errors.email && touchedFields.email}>
               {errors.email}
@@ -548,14 +559,5 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
   },
-  emailContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  emailSuffix: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: "#ccc",
-  },
+  // Removed old emailContainer/emailSuffix styles as they are now inline or unused
 });

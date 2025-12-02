@@ -1,16 +1,12 @@
-// app/(auth)/login.tsx
 import { useRouter } from "expo-router";
 import {
   onAuthStateChanged,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
-  sendEmailVerification,
 } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
-  Animated,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -23,8 +19,6 @@ import {
   ActivityIndicator,
   Button,
   HelperText,
-  Icon,
-  IconButton,
   Snackbar,
   Text,
   TextInput,
@@ -45,14 +39,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // --- Forgot Password State ---
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotError, setForgotError] = useState("");
-  const [forgotOpen, setForgotOpen] = useState(false);
-  const forgotAnim = useState(new Animated.Value(0))[0];
-  const [forgotLoading, setForgotLoading] = useState(false);
-
-  // --- Snackbar State (The "Fancy" Alternative to Alerts) ---
+  // --- Snackbar State ---
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarColor, setSnackbarColor] = useState(theme.colors.primary);
@@ -83,8 +70,14 @@ export default function Login() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Guard: If email is not verified, do NOT attempt to fetch profile.
+        // The handleLogin function will handle the alert and sign out.
+        if (!user.emailVerified) {
+            setCheckingAuth(false);
+            return; 
+        }
+
         try {
-          // Force refresh token to ensure backend recognizes new user
           const idToken = await user.getIdToken(true);
 
           const res = await fetch(`${API_URL}/auth/me`, {
@@ -95,7 +88,7 @@ export default function Login() {
 
           router.replace("/(tabs)");
         } catch (err) {
-          // REPLACED CONSOLE LOG: Show user that session is invalid
+          // Only sign out if we actually failed to fetch a valid session
           await signOut(auth); 
           setCheckingAuth(false);
           showMessage("Session expired. Please login again.", true);
@@ -126,10 +119,11 @@ export default function Login() {
 
       // 2️⃣ Check if email verified
       if (!user.emailVerified) {
-        await signOut(auth); // immediately log out
+        await signOut(auth);
         
-        // Note: We keep Alert here specifically because we need the "Resend" button action,
-        // which Snackbar doesn't handle as easily for complex flows.
+        // STOP LOADING BEFORE SHOWING ALERT
+        setLoading(false); 
+        
         Alert.alert(
           "Email not verified",
           "Please verify your email to continue.",
@@ -138,10 +132,21 @@ export default function Login() {
               text: "Resend Verification",
               onPress: async () => {
                 try {
-                  await sendEmailVerification(user);
+                  // CALL BACKEND API INSTEAD OF FIREBASE SDK
+                  // This allows us to send the custom NodeMailer email even if signed out
+                  const response = await fetch(`${API_URL}/auth/resend-verification`, {
+                      method: 'POST',
+                      headers: {
+                          'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({ email: fullEmail })
+                  });
+
+                  if (!response.ok) throw new Error("Failed to send");
+
                   showMessage("Verification email sent! Check your inbox.", false);
                 } catch (e: any) {
-                  showMessage(getFriendlyErrorMessage(e.code), true);
+                  showMessage("Failed to send verification email.", true);
                 }
               },
             },
@@ -167,52 +172,12 @@ export default function Login() {
       // 5️⃣ Success
       router.replace("/(tabs)");
     } catch (e: any) {
-      // REPLACED CONSOLE ERROR: Use Snackbar
       const msg = e.code ? getFriendlyErrorMessage(e.code) : (e.message || "Login failed");
       showMessage(msg, true);
     } finally {
+      // Ensure loading is stopped in all other cases
       setLoading(false);
     }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!forgotEmail.trim()) {
-      // REPLACED INLINE ERROR: Use Snackbar
-      showMessage("Please enter your email to reset password", true);
-      return;
-    }
-    if (!/\S+@\S+\.\S+/.test(forgotEmail)) {
-      // REPLACED INLINE ERROR: Use Snackbar
-      showMessage("Enter a valid email address", true);
-      return;
-    }
-
-    setForgotLoading(true);
-    try {
-      await sendPasswordResetEmail(auth, forgotEmail);
-      // setForgotError(""); // No longer needed
-      setForgotEmail("");
-      setForgotOpen(false);
-      
-      // REPLACED STATE: Use Helper
-      showMessage("Password reset link sent! Check your inbox.", false);
-    } catch (e: any) {
-      // REPLACED CONSOLE/STATE: Use Helper
-      const msg = getFriendlyErrorMessage(e.code ?? "");
-      // setForgotError(msg); // Removed inline error since we are using Snackbar
-      showMessage(msg, true); // Show snackbar for visibility
-    } finally {
-      setForgotLoading(false);
-    }
-  };
-
-  const toggleForgot = () => {
-    setForgotOpen((prev) => !prev);
-    Animated.timing(forgotAnim, {
-      toValue: forgotOpen ? 0 : 1,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
   };
 
   if (checkingAuth) {
@@ -245,7 +210,7 @@ export default function Login() {
               Powerbank Rental
             </Text>
 
-            <View style={styles.emailContainer}>
+            <View style={{ position: "relative", width: "100%" }}>
               <TextInput
                 placeholder="Email"
                 value={email}
@@ -258,7 +223,7 @@ export default function Login() {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 error={!!emailError}
-                style={{ flex: 1 }}
+                style={styles.input}
                 theme={{
                   colors: {
                     primary: theme.colors.onSurface,
@@ -271,9 +236,18 @@ export default function Login() {
                   roundness: 15,
                 }}
               />
-              <Text style={styles.emailSuffix}>@cvsu.edu.ph</Text>
+              <Text
+                style={{
+                  position: "absolute",
+                  right: 15,
+                  top: 20,
+                  color: "#FFFFFF",
+                  opacity: 0.8,
+                }}
+              >
+                @cvsu.edu.ph
+              </Text>
             </View>
-            {emailError ? <HelperText type="error">{emailError}</HelperText> : null}
 
             <TextInput
               placeholder="Password"
@@ -289,33 +263,14 @@ export default function Login() {
             />
             {passwordError ? <HelperText type="error" visible>{passwordError}</HelperText> : null}
 
-            <Button mode="text" onPress={toggleForgot} style={styles.linkButton} labelStyle={{ color: theme.colors.onSurface }}>Forgot Password?</Button>
-
-            <Animated.View style={{ opacity: forgotAnim, transform: [{ scaleY: forgotAnim }] }}>
-              {forgotOpen && (
-                <View style={styles.forgotContainer}>
-                  <TextInput
-                    placeholder="Enter your email"
-                    value={forgotEmail}
-                    editable={!forgotLoading}
-                    onChangeText={(t) => { setForgotEmail(t); if (forgotError) setForgotError(""); }}
-                    onFocus={() => setForgotError("")}
-                    mode="outlined"
-                    keyboardType="email-address"
-                    style={[styles.input, { flex: 1 }]}
-                    theme={{ colors: { primary: theme.colors.onSurface, text: theme.colors.onSurface, placeholder: theme.colors.onSurface, background: "transparent", onSurfaceVariant: "#FFFFFF", outline: "#FFFFFF" }, roundness: 15 }}
-                  />
-                  <View style={{ width: 48, alignItems: "center", justifyContent: "center" }}>
-                    {forgotLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> :
-                      <IconButton icon="send" size={25} iconColor={theme.colors.onSurface} onPress={handleForgotPassword} />}
-                  </View>
-                  {forgotError && <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                    <Icon source="close-circle" size={18} color={theme.colors.error} />
-                    <Text style={{ marginLeft: 6, color: theme.colors.error }}>{forgotError}</Text>
-                  </View>}
-                </View>
-              )}
-            </Animated.View>
+            <Button 
+                mode="text" 
+                onPress={() => router.push("/password-reset")} 
+                style={styles.linkButton} 
+                labelStyle={{ color: theme.colors.onSurface }}
+            >
+                Forgot Password?
+            </Button>
 
             {loading ? <ActivityIndicator animating size="large" color={theme.colors.primary} /> : <>
               <Button mode="contained" onPress={handleLogin} style={styles.button} buttonColor={theme.colors.primary} textColor={theme.colors.onPrimary}>Login</Button>
@@ -324,7 +279,6 @@ export default function Login() {
           </View>
         </ScrollView>
 
-        {/* --- Fancy Snackbar Component --- */}
         <Snackbar
           visible={snackbarVisible}
           onDismiss={() => setSnackbarVisible(false)}
@@ -383,16 +337,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 30,
   },
-  emailContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  emailSuffix: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: "#ccc",
-  },
   input: {
     marginBottom: 10,
   },
@@ -404,10 +348,5 @@ const styles = StyleSheet.create({
   linkButton: {
     alignSelf: "flex-end",
     marginBottom: 8,
-  },
-  forgotContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
   },
 });

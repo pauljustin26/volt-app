@@ -25,78 +25,90 @@ export default function TransactionHistory() {
 
   // Combined listener useEffect for Auth State and Firestore Snapshot
   useEffect(() => {
-    const user = auth.currentUser;
-    let unsubscribeSnapshot: Unsubscribe = () => {}; 
-
-    if (!user) {
-      setTransactions([]);
-      setLoading(false);
-      return;
-    }
-
+    let unsubscribeSnapshot: Unsubscribe = () => {};
+    // Start by assuming we are loading
     setLoading(true);
 
-    const txnsRef = collection(db, "users", user.uid, "transactions");
-    const q = query(txnsRef, orderBy("createdAt", "desc"));
+    // 1. Listen for AUTH State Changes first
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      // 2. Auth state is confirmed (user object or null)
 
-    unsubscribeSnapshot = onSnapshot(
-      q,
-      (snapshot) => {
-        const txns = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          
-          // Determine what amount to show based on transaction type
-          let displayAmount = 0;
-          let description = "";
+      // Clean up previous Firestore listener if it exists
+      unsubscribeSnapshot(); 
 
-          if (data.type === 'rent') {
-             displayAmount = data.fee || 0;
-             description = `Volt ${data.voltID || ''}`;
-          } else if (data.type === 'return') {
-             // For returns, we only show the penalty as the "amount" deducted
-             displayAmount = data.penaltyFee || 0;
-             description = `Volt ${data.voltID || ''}`;
-          } else if (data.type === 'topup') {
-             displayAmount = data.amount || 0;
-             description = "Wallet Recharge";
-          }
-
-          return {
-            reference: doc.id,
-            type: data.type,
-            description,
-            amount: displayAmount,
-            status: data.status || "pending",
-            
-            // NEW FIELDS from ReturnService
-            penaltyFee: data.penaltyFee || 0,
-            overdueMinutes: data.overdueMinutes || 0,
-            usedMinutes: data.usedMinutes || 0,
-            allowedMinutes: data.allowedMinutes || 0,
-
-            date:
-              data.completedAt?.toDate?.() ||
-              data.startTime?.toDate?.() ||
-              data.endTime?.toDate?.() ||
-              data.createdAt?.toDate?.() ||
-              new Date(),
-          };
-        });
-
-        setTransactions(txns.sort((a, b) => b.date.getTime() - a.date.getTime()));
+      if (!user) {
+        // User is not signed in
+        setTransactions([]);
         setLoading(false);
-      },
-      (error) => {
-        console.error("Snapshot error:", error);
-        if (error.code === 'permission-denied') {
-            setTransactions([]);
-        }
-        setLoading(false);
+        return;
       }
-    );
 
-    return () => unsubscribeSnapshot();
-  }, [auth.currentUser]); 
+      // 3. User is signed in, set up Firestore listener
+      const txnsRef = collection(db, "users", user.uid, "transactions");
+      const q = query(txnsRef, orderBy("createdAt", "desc"));
+
+      unsubscribeSnapshot = onSnapshot(
+        q,
+        (snapshot) => {
+          // ... your existing snapshot mapping logic ...
+          const txns = snapshot.docs.map((doc) => {
+             const data = doc.data();
+             
+             let displayAmount = 0;
+             let description = "";
+
+             if (data.type === 'rent') {
+                 displayAmount = data.fee || 0;
+                 description = `Volt ${data.voltID || ''}`;
+             } else if (data.type === 'return') {
+                 displayAmount = data.penaltyFee || 0;
+                 description = `Volt ${data.voltID || ''}`;
+             } else if (data.type === 'topup') {
+                 displayAmount = data.amount || 0;
+                 description = "Wallet Recharge";
+             }
+
+             return {
+                 reference: doc.id,
+                 type: data.type,
+                 description,
+                 amount: displayAmount,
+                 status: data.status || "pending",
+                 
+                 penaltyFee: data.penaltyFee || 0,
+                 overdueMinutes: data.overdueMinutes || 0,
+                 usedMinutes: data.usedMinutes || 0,
+                 allowedMinutes: data.allowedMinutes || 0,
+
+                 date:
+                     data.completedAt?.toDate?.() ||
+                     data.startTime?.toDate?.() ||
+                     data.endTime?.toDate?.() ||
+                     data.createdAt?.toDate?.() ||
+                     new Date(),
+             };
+          });
+
+          setTransactions(txns.sort((a, b) => b.date.getTime() - a.date.getTime()));
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Snapshot error:", error);
+          if (error.code === 'permission-denied') {
+              setTransactions([]);
+          }
+          setLoading(false);
+        }
+      );
+    });
+
+    // 4. Return cleanup function for both listeners
+    return () => {
+      unsubscribeAuth();
+      unsubscribeSnapshot(); 
+    }
+  }, []); // Empty dependency array, as auth.onAuthStateChanged handles state changes
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -240,7 +252,7 @@ export default function TransactionHistory() {
                   {/* Always show "Transaction Details" */}
                   Transaction Details
                 </Text>
-                <Divider style={{ marginVertical: 10 }} />
+                <Divider style={{ marginVertical: 10, backgroundColor: "#d7d7d7ff" }} />
                 
                 <DetailRow label="Reference" value={selectedTxn.reference} color={theme.colors.primary} />
                 <DetailRow label="Type" value={selectedTxn.type.toUpperCase()} color={theme.colors.primary} />
@@ -256,7 +268,7 @@ export default function TransactionHistory() {
                     
                     {selectedTxn.overdueMinutes > 0 ? (
                         <>
-                            <Divider style={{marginVertical: 6}} />
+                            <Divider style={{marginVertical: 6, backgroundColor: "#d7d7d7ff"}} />
                             <DetailRow 
                                 label="Overdue By" 
                                 value={`${selectedTxn.overdueMinutes} mins`} 
@@ -276,7 +288,7 @@ export default function TransactionHistory() {
                   </View>
                 )}
 
-                <Divider style={{ marginVertical: 15 }} />
+                <Divider style={{ marginVertical: 15, backgroundColor: "#d7d7d7ff" }} />
                 
                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
                     <Text style={{fontSize: 18, color: theme.colors.primary}}>

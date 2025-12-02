@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, View, TextInput, TouchableOpacity } from "react-native";
+import { StyleSheet, View, TouchableOpacity, Alert } from "react-native";
 import {
   Avatar,
   Button,
@@ -16,11 +16,8 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaContainer } from "../components/SafeAreaContainer";
 import { auth, db } from "../config/firebaseConfig";
-import { doc, getDoc } from "firebase/firestore"; // Only keeping doc, getDoc
-import {
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-} from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore"; 
+import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import axios from "axios";
@@ -34,10 +31,9 @@ export default function ProfileScreen() {
 
   const [userData, setUserData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false); // Unused, but kept
 
-  // Keeping only state related to Password Reset
-  const [passwordModalVisible, setPasswordModalVisible] = useState(false); // For Password Reset Confirmation
+  // State related to Password Reset
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
 
   // New state for universal Snackbar
   const [snackbar, setSnackbar] = useState({
@@ -88,8 +84,12 @@ export default function ProfileScreen() {
   }, []);
 
   const handleLogout = async () => {
-    await auth.signOut();
-    router.replace("/login");
+    try {
+      await auth.signOut();
+      router.replace("/login");
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
   };
 
   // Function to open the password reset confirmation modal
@@ -98,15 +98,23 @@ export default function ProfileScreen() {
     setPasswordModalVisible(true);
   };
 
-  // Function to send the password reset email
+  // --- UPDATED: Use Backend API for Password Reset ---
   const handleSendPasswordReset = async () => {
       try {
         if (userData?.email) {
-          await sendPasswordResetEmail(auth, userData.email);
-          showAlert("Password reset link sent to your email!", false);
+          // Call NestJS Backend API
+          await axios.post(`${API_URL}/auth/reset-password`, { 
+            email: userData.email 
+          });
+          
+          showAlert("Password reset has been sent to your email!", false);
+        } else {
+          showAlert("User email not found.", true);
         }
       } catch (err: any) {
-        showAlert(err.message || "Failed to send reset link.", true);
+        // Handle Axios error structure
+        const errorMessage = err.response?.data?.message || err.message || "Failed to send reset link.";
+        showAlert(errorMessage, true);
       } finally {
         setPasswordModalVisible(false);
       }
@@ -144,7 +152,7 @@ export default function ProfileScreen() {
     >
       <SafeAreaContainer style={{ flex: 1, backgroundColor: "transparent", padding: 20 }}>
         {/* Header */}
-                <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
             <Ionicons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
         <View style={styles.header}>
@@ -173,11 +181,9 @@ export default function ProfileScreen() {
 
         </View>
 
-
         {/* Settings */}
         <List.Section>
           <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Settings</List.Subheader>
-          {/* Only keeping Reset Password */}
             <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
               <List.Item
                 title="Reset Password"
@@ -191,47 +197,45 @@ export default function ProfileScreen() {
               />
             </Surface>
         </List.Section>
-            <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Others</List.Subheader>
-            <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
-              <List.Item
-                title="Help & Support"
-                description="FAQs and contact info"
-                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
-                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
-                left={(props) => <List.Icon {...props} icon="help-circle-outline" color={theme.colors.primary} />}
-                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
-                onPress={() => router.push("/faq")}
-                style={styles.listItem}
-              />
-              <Divider style={{ backgroundColor: theme.colors.primary, opacity: 0.1 }} />
-              <List.Item
-                title="Terms & Conditions"
-                description="Review policies"
-                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
-                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
-                left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
-                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
-                onPress={() => router.push("/terms")}
-                style={styles.listItem}
-              />
-            </Surface>
+            
+        <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Others</List.Subheader>
+        <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
+          <List.Item
+            title="Help & Support"
+            description="FAQs and contact info"
+            titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+            descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+            left={(props) => <List.Icon {...props} icon="help-circle-outline" color={theme.colors.primary} />}
+            right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+            onPress={() => router.push("/faq")}
+            style={styles.listItem}
+          />
+          <Divider style={{ backgroundColor: theme.colors.primary, opacity: 0.1 }} />
+          <List.Item
+            title="Terms & Conditions"
+            description="Review policies"
+            titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+            descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+            left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
+            right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+            onPress={() => router.push("/terms")}
+            style={styles.listItem}
+          />
+        </Surface>
 
-          <Button
-            mode="outlined"
-            onPress={handleLogout}
-            icon="logout"
-            style={[styles.logoutButton, { borderColor: theme.colors.error }]}
-            textColor={theme.colors.error}
-            contentStyle={{ height: 50 }}
-            labelStyle={{ fontSize: 16, fontWeight: '600' }}
-          >
-            Log Out
-          </Button>
+        <Button
+          mode="outlined"
+          onPress={handleLogout}
+          icon="logout"
+          style={[styles.logoutButton, { borderColor: theme.colors.error }]}
+          textColor={theme.colors.error}
+          contentStyle={{ height: 50 }}
+          labelStyle={{ fontSize: 16, fontWeight: '600' }}
+        >
+          Log Out
+        </Button>
 
         <Portal>
-          {/* -------------------------------------- */}
-          {/* Password Reset Confirmation Modal (MODAL) */}
-          {/* -------------------------------------- */}
           <Modal
             visible={passwordModalVisible}
             onDismiss={() => setPasswordModalVisible(false)}
@@ -287,9 +291,6 @@ export default function ProfileScreen() {
         </Portal>
       </SafeAreaContainer>
       
-      {/* -------------------------------------- */}
-      {/* UNIVERSAL SNACKBAR (Replaces all alerts) */}
-      {/* -------------------------------------- */}
       <Snackbar
         visible={snackbar.visible}
         onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
@@ -329,13 +330,7 @@ const styles = StyleSheet.create({
     width: "90%",
     maxHeight: '80%',
   },
-  input: { 
-    borderBottomWidth: 1, 
-    paddingVertical: 8, 
-    fontSize: 16,
-    paddingHorizontal: 0,
-  },
-    infoBadgeContainer: {
+  infoBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 5,
