@@ -75,17 +75,22 @@ export default function TransactionHistory() {
                  amount: displayAmount,
                  status: data.status || "pending",
                  
+                 // Return Details
                  penaltyFee: data.penaltyFee || 0,
                  overdueMinutes: data.overdueMinutes || 0,
                  usedMinutes: data.usedMinutes || 0,
                  allowedMinutes: data.allowedMinutes || 0,
+                 
+                 // Payment/Debt Details
+                 amountPaid: data.amountPaid || 0,
+                 debtIncurred: data.debtIncurred || 0,
 
                  date:
-                     data.completedAt?.toDate?.() ||
-                     data.startTime?.toDate?.() ||
-                     data.endTime?.toDate?.() ||
-                     data.createdAt?.toDate?.() ||
-                     new Date(),
+                    data.completedAt?.toDate?.() ||
+                    data.startTime?.toDate?.() ||
+                    data.endTime?.toDate?.() ||
+                    data.createdAt?.toDate?.() ||
+                    new Date(),
              };
           });
 
@@ -132,8 +137,8 @@ export default function TransactionHistory() {
   // Helper for modal rows
   const DetailRow = ({label, value, color, bold}: any) => (
     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
-        <Text style={{color: color, opacity: 0.7}}>{label}:</Text>
-        <Text style={{color: color, fontWeight: bold ? 'bold' : 'normal'}}>{value}</Text>
+        <Text style={{color: color || theme.colors.onSurface, opacity: 0.8}}>{label}:</Text>
+        <Text style={{color: color || theme.colors.onSurface, fontWeight: bold ? 'bold' : 'normal'}}>{value}</Text>
     </View>
   );
 
@@ -192,8 +197,6 @@ export default function TransactionHistory() {
                         >
                           {item.description}
                         </Text>
-                        
-                        {/* LATE Chip REMOVED here */}
                       </View>
                       
                       <Text style={[styles.statusText, { color: theme.colors.primary, opacity: 0.7 }]}>
@@ -249,12 +252,11 @@ export default function TransactionHistory() {
                   variant="headlineSmall"
                   style={[styles.modalTitle, { color: theme.colors.primary }]}
                 >
-                  {/* Always show "Transaction Details" */}
                   Transaction Details
                 </Text>
                 <Divider style={{ marginVertical: 10, backgroundColor: "#d7d7d7ff" }} />
                 
-                <DetailRow label="Reference" value={selectedTxn.reference} color={theme.colors.primary} />
+                <DetailRow label="Reference" value={selectedTxn.reference.slice(0, 10) + "..."} color={theme.colors.primary} />
                 <DetailRow label="Type" value={selectedTxn.type.toUpperCase()} color={theme.colors.primary} />
                 <DetailRow label="Date" value={selectedTxn.date.toLocaleString()} color={theme.colors.primary} />
 
@@ -275,15 +277,39 @@ export default function TransactionHistory() {
                                 color={theme.colors.error} 
                                 bold 
                             />
+                        </>
+                    ) : (
+                        <Text style={{color: '#21DD3D', fontStyle: 'italic', marginTop: 4, marginBottom: 8, textAlign: 'center'}}>Returned within time limit.</Text>
+                    )}
+
+                    {/* NEW: Payment Breakdown Section */}
+                    {(selectedTxn.penaltyFee > 0) && (
+                        <>
+                            <Divider style={{marginVertical: 8, backgroundColor: "#d7d7d7ff"}} />
+                            <Text style={{color: theme.colors.onSurfaceVariant, marginBottom: 8, fontWeight: 'bold'}}>Payment Details</Text>
+                            
                             <DetailRow 
-                                label="Penalty Deducted" 
+                                label="Total Penalty" 
                                 value={`₱ ${selectedTxn.penaltyFee.toFixed(2)}`} 
                                 color={theme.colors.error} 
                                 bold
                             />
+
+                            <DetailRow 
+                                label="Paid from Wallet" 
+                                value={`₱ ${selectedTxn.amountPaid.toFixed(2)}`} 
+                                color={theme.colors.primary} 
+                            />
+
+                            {selectedTxn.debtIncurred > 0 && (
+                                <DetailRow 
+                                    label="Added to Debt" 
+                                    value={`₱ ${selectedTxn.debtIncurred.toFixed(2)}`} 
+                                    color={theme.colors.error} 
+                                    bold 
+                                />
+                            )}
                         </>
-                    ) : (
-                        <Text style={{color: '#21DD3D', fontStyle: 'italic', marginTop: 4, textAlign: 'center'}}>Returned within time limit.</Text>
                     )}
                   </View>
                 )}

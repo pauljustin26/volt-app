@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useRouter } from "expo-router";
-// import { sendPasswordResetEmail } from "firebase/auth"; // <--- DELETE THIS
+import { getAuth, sendPasswordResetEmail } from "firebase/auth"; 
 import { LinearGradient } from "expo-linear-gradient";
 import {
   KeyboardAvoidingView,
@@ -19,8 +19,7 @@ import {
   IconButton,
 } from "react-native-paper";
 
-// Define your backend URL (Ensure this points to your NestJS server)
-const API_URL = process.env.EXPO_PUBLIC_API_URL; 
+const auth = getAuth();
 
 export default function PasswordReset() {
   const theme = useTheme();
@@ -33,6 +32,8 @@ export default function PasswordReset() {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarColor, setSnackbarColor] = useState(theme.colors.primary);
+
+  const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
   // --- Helpers ---
   const showMessage = (message: string, isError: boolean = true) => {
@@ -49,23 +50,24 @@ export default function PasswordReset() {
 
     setLoading(true);
     try {
-      // Construct the full email with the domain suffix
+      // 1. Construct the full email
       const fullEmail = `${email.trim().toLowerCase()}@cvsu.edu.ph`;
-      
-      // --- NEW: Call NestJS Backend ---
-      const response = await fetch(`${API_URL}/auth/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+
+      // 2. CHECK WITH BACKEND FIRST
+      // We ask the backend: "Does this user actually exist in Firestore?"
+      const checkRes = await fetch(`${API_URL}/auth/check-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: fullEmail }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to send reset email.");
+      if (!checkRes.ok) {
+        // If backend says 400/404, the user doesn't exist
+        throw new Error("This email is not registered in our system.");
       }
+      
+      // 3. If Backend passed, NOW send the Firebase email
+      await sendPasswordResetEmail(auth, fullEmail);
       
       showMessage("Password reset link sent! Check your inbox.", false);
       
@@ -73,9 +75,13 @@ export default function PasswordReset() {
       setEmail("");
 
     } catch (e: any) {
-      // Since we are now getting errors from our backend, 
-      // we might get simple strings or objects.
-      const msg = e.message || "Network request failed.";
+      console.log(e);
+      let msg = e.message || "Failed to send reset email.";
+      
+      // Handle Firebase specific errors just in case
+      if (e.code === 'auth/user-not-found') msg = "No user found with this email.";
+      if (e.code === 'auth/invalid-email') msg = "Invalid email format.";
+      
       showMessage(msg, true);
     } finally {
       setLoading(false);
@@ -115,7 +121,7 @@ export default function PasswordReset() {
             </Text>
 
             <Text variant="bodyLarge" style={[styles.description, { color: "#FFFFFF" }]}>
-              Enter your user account's verified email address and we will send you a customized password reset link.
+              Enter your user account's verified email address and we will send you a password reset link.
             </Text>
 
             {/* Email Input with Suffix Overlay */}

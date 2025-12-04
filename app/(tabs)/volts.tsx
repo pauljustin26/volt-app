@@ -2,8 +2,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Dimensions, Image, StyleSheet, View, ScrollView, Alert, TouchableOpacity  } from "react-native";
-import { ActivityIndicator, Button, Card, IconButton, Text, useTheme } from "react-native-paper";
+import { Dimensions, Image, StyleSheet, View, ScrollView, Alert, TouchableOpacity  } from "react-native";
+import { 
+  ActivityIndicator, 
+  Button, 
+  Card, 
+  IconButton, 
+  Text, 
+  useTheme,
+  Portal,    // <--- Added
+  Dialog,    // <--- Added
+  Paragraph  // <--- Added
+} from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { collection, doc, onSnapshot, getDoc, Unsubscribe } from "firebase/firestore";
 import { db, auth } from "../../config/firebaseConfig";
@@ -20,6 +30,10 @@ export default function VoltsList() {
   const [volts, setVolts] = useState<any[]>([]);
   const [myRentals, setMyRentals] = useState<any[]>([]);
   const [reservingVoltId, setReservingVoltId] = useState<string | null>(null);
+  
+  // --- STATE FOR LIMIT DIALOG ---
+  const [showLimitDialog, setShowLimitDialog] = useState(false);
+
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
   // TabView state
@@ -81,10 +95,7 @@ export default function VoltsList() {
 
     // ⭐ 1. CHECK FOR EXISTING RENTAL LIMIT HERE
     if (myRentals.length > 0) {
-      Alert.alert(
-        "Limit Reached", 
-        "You already have an active rental. Please return your current Volt before renting another one."
-      );
+      setShowLimitDialog(true); // <--- Updated to show Dialog instead of Alert
       return;
     }
 
@@ -239,6 +250,9 @@ const AvailableRoute = () => {
           <Text style={[styles.cardTitle, { color: theme.colors.primary }]}>
             Available Units
           </Text>
+           <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>
+            Select`` to Rent:
+          </Text>
           <View style={{ marginTop: 8 }}>
             {renderVoltPills(availableVolts)}
           </View>
@@ -331,6 +345,32 @@ const MyRentalsRoute = () => (
             />
           )}
         />
+
+        {/* --- LIMIT REACHED DIALOG --- */}
+        <Portal>
+            <Dialog visible={showLimitDialog} onDismiss={() => setShowLimitDialog(false)} style={{ backgroundColor: theme.colors.onPrimary }}>
+                <Dialog.Title style={{ color: theme.colors.error, fontWeight: 'bold' }}>Limit Reached</Dialog.Title>
+                <Dialog.Content>
+                    <Paragraph style={{ color: theme.colors.onSurface }}>
+                        You already have an active rental. Please return your current Volt before renting another one.
+                    </Paragraph>
+                </Dialog.Content>
+                <Dialog.Actions>
+                    <Button onPress={() => setShowLimitDialog(false)} textColor={theme.colors.onSurface}>Cancel</Button>
+                    <Button 
+                        onPress={() => {
+                            setShowLimitDialog(false);
+                            setIndex(1); // Switch to "Return" tab
+                        }} 
+                        mode="contained"
+                        buttonColor={theme.colors.primary}
+                    >
+                        View My Rental
+                    </Button>
+                </Dialog.Actions>
+            </Dialog>
+        </Portal>
+
       </SafeAreaView>
     </LinearGradient>
   );
@@ -342,4 +382,8 @@ const styles = StyleSheet.create({
   logoInline: { width: 50, height: 50 },
   card: { borderRadius: 16, padding: 10, elevation: 4, marginBottom: 10 },
   cardTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 6 },
+  cardSubtitle: {
+    fontSize: 14,
+    marginVertical: 4,
+  },
 });

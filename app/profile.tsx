@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, View, TouchableOpacity, Alert } from "react-native";
+import { StyleSheet, View, TouchableOpacity, Alert, SafeAreaView, Platform, StatusBar } from "react-native";
 import {
   Avatar,
   Button,
@@ -14,10 +14,10 @@ import {
   Surface,
 } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
-import { SafeAreaContainer } from "../components/SafeAreaContainer";
+// Removed external dependency: import { SafeAreaContainer } from "../components/SafeAreaContainer";
 import { auth, db } from "../config/firebaseConfig";
 import { doc, getDoc } from "firebase/firestore"; 
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, sendPasswordResetEmail } from "firebase/auth";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import axios from "axios";
@@ -61,20 +61,23 @@ export default function ProfileScreen() {
         return;
       }
       try {
-        // initialize backend user (if not existing)
-        await axios.get(`${API_URL}/users/init`, await getAuthHeaders());
+        // 1. Get headers
+        const headers = await getAuthHeaders();
 
-        // fetch user from backend
-        const res = await axios.get(`${API_URL}/users/me`, await getAuthHeaders());
+        const res = await axios.get(`${API_URL}/users/me`, headers);
+        
         if (res.data) {
           setUserData(res.data);
         } else {
-          // fallback if backend empty (fetch from Firestore)
+          // Fallback to Firestore if backend returns nothing
+          console.log("Backend returned empty, checking Firestore...");
           const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) setUserData(userDoc.data());
+          if (userDoc.exists()) {
+            setUserData(userDoc.data());
+          }
         }
       } catch (err) {
-        console.error("Error fetching user profile:", err);
+        console.error("Error details:", err);
         showAlert("Failed to load profile data.", true);
       } finally {
         setLoading(false);
@@ -98,22 +101,20 @@ export default function ProfileScreen() {
     setPasswordModalVisible(true);
   };
 
-  // --- UPDATED: Use Backend API for Password Reset ---
+  // --- REVERTED: Use Firebase SDK for Password Reset ---
   const handleSendPasswordReset = async () => {
       try {
         if (userData?.email) {
-          // Call NestJS Backend API
-          await axios.post(`${API_URL}/auth/reset-password`, { 
-            email: userData.email 
-          });
+          // Use standard Firebase SDK
+          await sendPasswordResetEmail(auth, userData.email);
           
           showAlert("Password reset has been sent to your email!", false);
         } else {
           showAlert("User email not found.", true);
         }
       } catch (err: any) {
-        // Handle Axios error structure
-        const errorMessage = err.response?.data?.message || err.message || "Failed to send reset link.";
+        let errorMessage = "Failed to send reset link.";
+        if (err.code === 'auth/user-not-found') errorMessage = "User not found.";
         showAlert(errorMessage, true);
       } finally {
         setPasswordModalVisible(false);
@@ -129,16 +130,17 @@ export default function ProfileScreen() {
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       >
-        <SafeAreaContainer
+        <SafeAreaView
           style={{
             flex: 1,
             justifyContent: "center",
             alignItems: "center",
             backgroundColor: "transparent",
+            paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
           }}
         >
           <ActivityIndicator size="large" color={theme.colors.primary} />
-        </SafeAreaContainer>
+        </SafeAreaView>
       </LinearGradient>
     );
   }
@@ -150,90 +152,92 @@ export default function ProfileScreen() {
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
     >
-      <SafeAreaContainer style={{ flex: 1, backgroundColor: "transparent", padding: 20 }}>
-        {/* Header */}
-        <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={28} color="#fff" />
-        </TouchableOpacity>
-        <View style={styles.header}>
-          <Avatar.Text
-            size={72}
-            label={
-              (userData?.firstName?.[0] ?? "") + (userData?.lastName?.[0] ?? "U")
-            }
-            style={{ backgroundColor: theme.colors.primary }}
-            color={theme.colors.onPrimary}
-          />
-          <Text variant="headlineMedium" style={[styles.name, { color: theme.colors.primary }]}>
-            {userData?.firstName ?? ""} {userData?.lastName ?? ""}
-          </Text>
-          <Text style={{ color: theme.colors.primary }}>{userData?.email ?? ""}</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "transparent", paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 }}>
+        <View style={{ flex: 1, padding: 20 }}>
+          {/* Header */}
+          <TouchableOpacity onPress={() => router.replace("/")} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          <View style={styles.header}>
+            <Avatar.Text
+              size={72}
+              label={
+                (userData?.firstName?.[0] ?? "") + (userData?.lastName?.[0] ?? "U")
+              }
+              style={{ backgroundColor: theme.colors.primary }}
+              color={theme.colors.onPrimary}
+            />
+            <Text variant="headlineMedium" style={[styles.name, { color: theme.colors.primary }]}>
+              {userData?.firstName ?? ""} {userData?.lastName ?? ""}
+            </Text>
+            <Text style={{ color: theme.colors.primary }}>{userData?.email ?? ""}</Text>
 
-            <View style={styles.infoBadgeContainer}>
-              <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
-                ID: {userData?.studentId ?? "N/A"}
-              </Text>
-              <Text style={{ color: theme.colors.primary, marginHorizontal: 8, opacity: 0.5 }}>|</Text>
-              <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
-                {userData?.mobileNumber ?? "No Mobile"}
-              </Text>
-            </View>
+              <View style={styles.infoBadgeContainer}>
+                <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                  ID: {userData?.studentId ?? "N/A"}
+                </Text>
+                <Text style={{ color: theme.colors.primary, marginHorizontal: 8, opacity: 0.5 }}>|</Text>
+                <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                  {userData?.mobileNumber ?? "No Mobile"}
+                </Text>
+              </View>
 
+          </View>
+
+          {/* Settings */}
+          <List.Section>
+            <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Settings</List.Subheader>
+              <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
+                <List.Item
+                  title="Reset Password"
+                  description="Change your login password"
+                  titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+                  descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+                  left={(props) => <List.Icon {...props} icon="lock-reset" color={theme.colors.primary} />}
+                  right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+                  onPress={handleChangePassword}
+                  style={styles.listItem}
+                />
+              </Surface>
+          </List.Section>
+              
+          <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Others</List.Subheader>
+          <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
+            <List.Item
+              title="Help & Support"
+              description="FAQs and contact info"
+              titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+              descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+              left={(props) => <List.Icon {...props} icon="help-circle-outline" color={theme.colors.primary} />}
+              right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+              onPress={() => router.push("/faq")}
+              style={styles.listItem}
+            />
+            <Divider style={{ backgroundColor: theme.colors.primary, opacity: 0.1 }} />
+            <List.Item
+              title="Terms & Conditions"
+              description="Review policies"
+              titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
+              descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
+              left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
+              right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
+              onPress={() => router.push("/terms")}
+              style={styles.listItem}
+            />
+          </Surface>
+
+          <Button
+            mode="outlined"
+            onPress={handleLogout}
+            icon="logout"
+            style={[styles.logoutButton, { borderColor: theme.colors.error }]}
+            textColor={theme.colors.error}
+            contentStyle={{ height: 50 }}
+            labelStyle={{ fontSize: 16, fontWeight: '600' }}
+          >
+            Log Out
+          </Button>
         </View>
-
-        {/* Settings */}
-        <List.Section>
-          <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Settings</List.Subheader>
-            <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
-              <List.Item
-                title="Reset Password"
-                description="Change your login password"
-                titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
-                descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
-                left={(props) => <List.Icon {...props} icon="lock-reset" color={theme.colors.primary} />}
-                right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
-                onPress={handleChangePassword}
-                style={styles.listItem}
-              />
-            </Surface>
-        </List.Section>
-            
-        <List.Subheader style={{ color: theme.colors.primary, fontWeight: "bold" }}>Others</List.Subheader>
-        <Surface style={[styles.cardSurface, { backgroundColor: theme.colors.onPrimary }]} elevation={1}>
-          <List.Item
-            title="Help & Support"
-            description="FAQs and contact info"
-            titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
-            descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
-            left={(props) => <List.Icon {...props} icon="help-circle-outline" color={theme.colors.primary} />}
-            right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
-            onPress={() => router.push("/faq")}
-            style={styles.listItem}
-          />
-          <Divider style={{ backgroundColor: theme.colors.primary, opacity: 0.1 }} />
-          <List.Item
-            title="Terms & Conditions"
-            description="Review policies"
-            titleStyle={{ color: theme.colors.primary, fontWeight: '600' }}
-            descriptionStyle={{ color: theme.colors.primary, opacity: 0.7 }}
-            left={(props) => <List.Icon {...props} icon="file-document-outline" color={theme.colors.primary} />}
-            right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.primary} />}
-            onPress={() => router.push("/terms")}
-            style={styles.listItem}
-          />
-        </Surface>
-
-        <Button
-          mode="outlined"
-          onPress={handleLogout}
-          icon="logout"
-          style={[styles.logoutButton, { borderColor: theme.colors.error }]}
-          textColor={theme.colors.error}
-          contentStyle={{ height: 50 }}
-          labelStyle={{ fontSize: 16, fontWeight: '600' }}
-        >
-          Log Out
-        </Button>
 
         <Portal>
           <Modal
@@ -289,7 +293,7 @@ export default function ProfileScreen() {
           </Modal>
 
         </Portal>
-      </SafeAreaContainer>
+      </SafeAreaView>
       
       <Snackbar
         visible={snackbar.visible}

@@ -3,6 +3,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  sendEmailVerification
 } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,7 +14,6 @@ import {
   ScrollView,
   StyleSheet,
   View,
-  Alert
 } from "react-native";
 import {
   ActivityIndicator,
@@ -23,6 +23,9 @@ import {
   Text,
   TextInput,
   useTheme,
+  Portal,   // <--- Added
+  Dialog,   // <--- Added
+  Paragraph // <--- Added
 } from "react-native-paper";
 import { auth } from "../../config/firebaseConfig";
 
@@ -38,6 +41,11 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // --- Verification Dialog State (For Web Support) ---
+  const [showVerifyDialog, setShowVerifyDialog] = useState(false);
+  const [pendingUser, setPendingUser] = useState<any>(null);
+  const [resendLoading, setResendLoading] = useState(false);
 
   // --- Snackbar State ---
   const [snackbarVisible, setSnackbarVisible] = useState(false);
@@ -69,26 +77,17 @@ export default function Login() {
   // --- Effects ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Guard: If email is not verified, do NOT attempt to fetch profile.
-        // The handleLogin function will handle the alert and sign out.
-        if (!user.emailVerified) {
-            setCheckingAuth(false);
-            return; 
-        }
-
+      // If user is logged in AND verified, navigate.
+      if (user && user.emailVerified) {
         try {
           const idToken = await user.getIdToken(true);
-
           const res = await fetch(`${API_URL}/auth/me`, {
             headers: { Authorization: `Bearer ${idToken}` },
           });
 
           if (!res.ok) throw new Error("Backend unavailable");
-
           router.replace("/(tabs)");
         } catch (err) {
-          // Only sign out if we actually failed to fetch a valid session
           await signOut(auth); 
           setCheckingAuth(false);
           showMessage("Session expired. Please login again.", true);
@@ -102,6 +101,38 @@ export default function Login() {
   }, []);
 
   // --- Handlers ---
+
+  // 1. Logic to Resend Email (Called from Dialog)
+  const handleResendVerification = async () => {
+    if (!pendingUser) return;
+    setResendLoading(true);
+    try {
+      await sendEmailVerification(pendingUser);
+      showMessage("Verification email sent! Check your inbox.", false);
+      setShowVerifyDialog(false);
+      await signOut(auth); // Sign out after sending
+    } catch (err: any) {
+      if (err.code === 'auth/too-many-requests') {
+        showMessage("Too many requests. Please wait a moment.", true);
+      } else {
+        showMessage("Failed to send email. Try again later.", true);
+      }
+      setShowVerifyDialog(false);
+      await signOut(auth);
+    } finally {
+      setResendLoading(false);
+      setPendingUser(null);
+    }
+  };
+
+  // 2. Logic to Cancel/Close Dialog
+  const handleDismissDialog = async () => {
+    setShowVerifyDialog(false);
+    setPendingUser(null);
+    await signOut(auth);
+  };
+
+  // 3. Login Logic
   const handleLogin = async () => {
     let valid = true;
     if (!email.trim()) { setEmailError("Email is required"); valid = false; }
@@ -112,54 +143,24 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // 1️⃣ Sign in via Firebase
+      // Sign in via Firebase
       const fullEmail = `${email.trim().toLowerCase()}@cvsu.edu.ph`;
       const userCredential = await signInWithEmailAndPassword(auth, fullEmail, password);
       const user = userCredential.user;
 
-      // 2️⃣ Check if email verified
+      // Force Reload to get latest status
+      await user.reload();
+
+      // Check Verification
       if (!user.emailVerified) {
-        await signOut(auth);
-        
-        // STOP LOADING BEFORE SHOWING ALERT
         setLoading(false); 
-        
-        Alert.alert(
-          "Email not verified",
-          "Please verify your email to continue.",
-          [
-            {
-              text: "Resend Verification",
-              onPress: async () => {
-                try {
-                  // CALL BACKEND API INSTEAD OF FIREBASE SDK
-                  // This allows us to send the custom NodeMailer email even if signed out
-                  const response = await fetch(`${API_URL}/auth/resend-verification`, {
-                      method: 'POST',
-                      headers: {
-                          'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({ email: fullEmail })
-                  });
-
-                  if (!response.ok) throw new Error("Failed to send");
-
-                  showMessage("Verification email sent! Check your inbox.", false);
-                } catch (e: any) {
-                  showMessage("Failed to send verification email.", true);
-                }
-              },
-            },
-            { text: "OK" },
-          ]
-        );
+        setPendingUser(user); // Save user for the dialog actions
+        setShowVerifyDialog(true); // <--- Trigger the Web-Compatible Dialog
         return; 
       }
 
-      // 3️⃣ If verified, get token
+      // If verified, proceed
       const idToken = await user.getIdToken(true);
-
-      // 4️⃣ Backend validation
       const res = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
@@ -169,13 +170,11 @@ export default function Login() {
         throw new Error("Backend unavailable or unauthorized");
       }
 
-      // 5️⃣ Success
       router.replace("/(tabs)");
     } catch (e: any) {
       const msg = e.code ? getFriendlyErrorMessage(e.code) : (e.message || "Login failed");
       showMessage(msg, true);
     } finally {
-      // Ensure loading is stopped in all other cases
       setLoading(false);
     }
   };
@@ -278,6 +277,24 @@ export default function Login() {
             </>}
           </View>
         </ScrollView>
+
+        {/* --- WEB COMPATIBLE DIALOG FOR VERIFICATION --- */}
+        <Portal>
+          <Dialog visible={showVerifyDialog} onDismiss={handleDismissDialog}>
+            <Dialog.Title>Email Not Verified</Dialog.Title>
+            <Dialog.Content>
+              <Paragraph>
+                You must verify your email before logging in. Please check your inbox (and spam folder).
+              </Paragraph>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={handleDismissDialog} textColor={theme.colors.error}>Cancel</Button>
+              <Button onPress={handleResendVerification} loading={resendLoading} disabled={resendLoading}>
+                Resend Email
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
 
         <Snackbar
           visible={snackbarVisible}

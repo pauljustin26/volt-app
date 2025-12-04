@@ -1,6 +1,9 @@
 import { useRouter } from "expo-router";
 // Replaced expo-checkbox with react-native-paper Checkbox for the icon style
-import { createUserWithEmailAndPassword } from "firebase/auth"; // Removed sendEmailVerification
+import { 
+  createUserWithEmailAndPassword,
+  sendEmailVerification // Added import
+} from "firebase/auth"; 
 import React, { useState, useMemo } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -20,7 +23,7 @@ import {
   TextInput, 
   useTheme, 
   Snackbar,
-  Checkbox // Imported from paper
+  Checkbox 
 } from "react-native-paper";
 import { auth } from "../../config/firebaseConfig";
 import { useAppTheme } from "../_layout";
@@ -177,7 +180,6 @@ export default function Signup() {
       const fullEmail = `${formData.email.trim().toLowerCase()}@cvsu.edu.ph`;
 
       // 3. Check if student ID is valid AND already registered
-      // This call will fail if the student ID is not in the CSV list or if it's already used
       const checkRes = await fetch(`${API_URL}/auth/check-student`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,12 +188,10 @@ export default function Signup() {
 
       if (!checkRes.ok) {
         const data = await checkRes.json().catch(() => ({}));
-        // If this throws, we go to catch() block and DO NOT create Firebase user
         throw new Error(data.message || "Student ID check failed.");
       }
 
       // 4. Create Firebase Auth user
-      // This only runs if the check above was successful
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         fullEmail,
@@ -199,40 +199,52 @@ export default function Signup() {
       );
       const user = userCredential.user;
 
-      // 5. Send verification email & Save user info to backend
-      const idToken = await user.getIdToken(true);
-      const res = await fetch(`${API_URL}/auth/init`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          firstName: formData.firstName.trim(),
-          lastName: formData.lastName.trim(),
-          studentId: formData.studentId.trim(),
-          mobileNumber: formData.mobileNumber.trim(),
-          // Store terms agreement status and timestamp
-          termsAccepted: true,
-          termsAcceptedAt: new Date().toISOString(),
-        }),
-      });
+      try {
+        // 5. Save user info to backend
+        const idToken = await user.getIdToken(true);
+        const res = await fetch(`${API_URL}/auth/init`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            firstName: formData.firstName.trim(),
+            lastName: formData.lastName.trim(),
+            studentId: formData.studentId.trim(),
+            mobileNumber: formData.mobileNumber.trim(),
+            termsAccepted: true,
+            termsAcceptedAt: new Date().toISOString(),
+          }),
+        });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Failed to save user info.");
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message || "Failed to save user info.");
+        }
+
+        // 6. Verification Email
+        await sendEmailVerification(user);
+
+        // 7. Success Message
+        showMessage("Registration complete! A verification link has been sent to your email.", false);
+
+        // 8. Log out until verified
+        await auth.signOut();
+        
+        setTimeout(() => {
+          router.replace("/login");
+        }, 2500);
+
+      } catch (backendError: any) {
+        // --- CRITICAL FIX: CLEANUP ---
+        // If Backend Init fails, DELETE the Firebase Auth user so they aren't stuck
+        // with an account but no Firestore data.
+        if (auth.currentUser) {
+           await auth.currentUser.delete().catch(e => console.log("Cleanup failed", e));
+        }
+        throw backendError; // Re-throw to be caught by outer catch
       }
-
-      // 6. Notify user using Snackbar (Success)
-      showMessage("Registration complete! A custom verification link has been sent to your email.", false);
-
-      // 7. Log out until verified
-      await auth.signOut();
-      
-      // Navigate after delay
-      setTimeout(() => {
-        router.replace("/login");
-      }, 2500);
 
     } catch (err: any) {
       let message = err.message || "Signup failed. Please try again.";
@@ -242,7 +254,7 @@ export default function Signup() {
       else if (err.code === "auth/network-request-failed") message = "Network error. Check your connection.";
 
       setErrors(prev => ({ ...prev, submit: message }));
-      showMessage(message, true); // Show in Snackbar
+      showMessage(message, true);
     } finally {
       setLoading(false);
     }
@@ -559,5 +571,4 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
   },
-  // Removed old emailContainer/emailSuffix styles as they are now inline or unused
 });
