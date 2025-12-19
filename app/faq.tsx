@@ -87,17 +87,17 @@ export default function SupportScreen() {
           
           <Pressable onPress={() => Linking.openURL('mailto:support@voltvault.com')} style={styles.contactRow}>
             <Ionicons name="mail" size={20} color={theme.colors.primary} />
-            <Text style={[styles.linkText, { color: theme.colors.primary }]}>support@voltvault.com</Text>
+            <Text style={[styles.linkText, { color: theme.colors.primary }]}>voltvault.cvsu@gmail.com</Text>
           </Pressable>
 
           <Pressable onPress={() => Linking.openURL('tel:+639123456789')} style={styles.contactRow}>
             <Ionicons name="call" size={20} color={theme.colors.primary} />
-            <Text style={[styles.linkText, { color: theme.colors.primary }]}>+63 912 345 6789</Text>
+            <Text style={[styles.linkText, { color: theme.colors.primary }]}>+639997697879</Text>
           </Pressable>
         </View>
 
         {/* ⭐ STANDARD ADDITION: Social Media */}
-        <Text style={[styles.sectionTitle, { color: theme.colors.primary, marginTop: 20 }]}>
+        {/* <Text style={[styles.sectionTitle, { color: theme.colors.primary, marginTop: 20 }]}>
           Follow Us
         </Text>
         <View style={[styles.card, styles.socialRow, { backgroundColor: theme.colors.onPrimary, borderRadius: 12 }]}>
@@ -113,7 +113,7 @@ export default function SupportScreen() {
              icon={() => <Ionicons name="logo-instagram" size={28} color="#C13584" />} 
              onPress={() => openSocial('https://instagram.com')}
            />
-        </View>
+        </View> */}
 
         {/* FAQs Section */}
         <Text style={[styles.sectionTitle, { color: theme.colors.primary, marginTop: 20 }]}>
@@ -150,7 +150,7 @@ export default function SupportScreen() {
             VoltVault App Version {appVersion}
           </Text>
           <Text style={{ color: theme.colors.onSurface, opacity: 0.5, fontSize: 12, marginTop: 2 }}>
-            © 2025 VoltVault Inc. All rights reserved.
+            © 2025 VoltVault. All rights reserved.
           </Text>
         </View>
 
