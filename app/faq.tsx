@@ -21,7 +21,7 @@ export default function SupportScreen() {
     {
       id: "1",
       question: "How do I rent a powerbank?",
-      answer: "Go to the 'Rent' tab, select a nearby station on the map, choose your rental duration, and confirm payment. The station will release a powerbank for you."
+      answer: "Go to the “Rent” tab, select a power bank slot, choose your rental duration, and confirm payment. The kiosk will then release a power bank for you."
     },
     {
       id: "2",
@@ -31,7 +31,7 @@ export default function SupportScreen() {
     {
       id: "3",
       question: "What happens if I'm late?",
-      answer: "We offer a 5-minute grace period after your rental time expires. Beyond that, a penalty fee of ₱5.00 per minute will be deducted from your wallet."
+      answer: "We provide a 5-minute grace period after the rental period expires. After this, a penalty fee of ₱5.00 per minute will be deducted from your wallet."
     },
     {
       id: "4",

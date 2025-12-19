@@ -10,7 +10,6 @@ import {
   Portal,
   Text,
   useTheme,
-  Chip,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../../config/firebaseConfig";
@@ -23,34 +22,25 @@ export default function TransactionHistory() {
   const [selectedTxn, setSelectedTxn] = useState<any | null>(null);
   const theme = useTheme();
 
-  // Combined listener useEffect for Auth State and Firestore Snapshot
   useEffect(() => {
     let unsubscribeSnapshot: Unsubscribe = () => {};
-    // Start by assuming we are loading
     setLoading(true);
 
-    // 1. Listen for AUTH State Changes first
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      // 2. Auth state is confirmed (user object or null)
-
-      // Clean up previous Firestore listener if it exists
       unsubscribeSnapshot(); 
 
       if (!user) {
-        // User is not signed in
         setTransactions([]);
         setLoading(false);
         return;
       }
 
-      // 3. User is signed in, set up Firestore listener
       const txnsRef = collection(db, "users", user.uid, "transactions");
       const q = query(txnsRef, orderBy("createdAt", "desc"));
 
       unsubscribeSnapshot = onSnapshot(
         q,
         (snapshot) => {
-          // ... your existing snapshot mapping logic ...
           const txns = snapshot.docs.map((doc) => {
              const data = doc.data();
              
@@ -59,13 +49,20 @@ export default function TransactionHistory() {
 
              if (data.type === 'rent') {
                  displayAmount = data.fee || 0;
-                 description = `Volt ${data.voltID || ''}`;
+                 description = `Volt ${data.voltID || ''} Rental`;
              } else if (data.type === 'return') {
-                 displayAmount = data.penaltyFee || 0;
-                 description = `Volt ${data.voltID || ''}`;
+                 // For the LIST view, we generally show the TOTAL paid (Fee + Penalty)
+                 const penalty = data.penaltyFee || 0;
+                 const baseFee = data.fee || 0;
+                 displayAmount = baseFee + penalty; // Show full amount paid
+                 
+                 description = `Volt ${data.voltID || ''} Return`;
              } else if (data.type === 'topup') {
                  displayAmount = data.amount || 0;
                  description = "Wallet Recharge";
+             } else {
+                 description = "Transaction";
+                 displayAmount = data.amount || 0;
              }
 
              return {
@@ -73,24 +70,21 @@ export default function TransactionHistory() {
                  type: data.type,
                  description,
                  amount: displayAmount,
-                 status: data.status || "pending",
+                 status: data.status || "pending", 
                  
                  // Return Details
                  penaltyFee: data.penaltyFee || 0,
+                 fee: data.fee || 0, // Base fee
                  overdueMinutes: data.overdueMinutes || 0,
                  usedMinutes: data.usedMinutes || 0,
                  allowedMinutes: data.allowedMinutes || 0,
                  
-                 // Payment/Debt Details
-                 amountPaid: data.amountPaid || 0,
-                 debtIncurred: data.debtIncurred || 0,
-
                  date:
-                    data.completedAt?.toDate?.() ||
-                    data.startTime?.toDate?.() ||
-                    data.endTime?.toDate?.() ||
-                    data.createdAt?.toDate?.() ||
-                    new Date(),
+                   data.completedAt?.toDate?.() ||
+                   data.startTime?.toDate?.() ||
+                   data.endTime?.toDate?.() ||
+                   data.createdAt?.toDate?.() ||
+                   new Date(),
              };
           });
 
@@ -99,48 +93,135 @@ export default function TransactionHistory() {
         },
         (error) => {
           console.error("Snapshot error:", error);
-          if (error.code === 'permission-denied') {
-              setTransactions([]);
-          }
           setLoading(false);
         }
       );
     });
 
-    // 4. Return cleanup function for both listeners
     return () => {
       unsubscribeAuth();
       unsubscribeSnapshot(); 
     }
-  }, []); // Empty dependency array, as auth.onAuthStateChanged handles state changes
-
+  }, []);
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed": return "#21DD3D";
-      case "pending": return "#FDAE37";
-      case "failed": return "#EB4747";
-      // Active status usually implies ongoing, use primary color or a specific status color
-      case "active": return theme.colors.primary; 
+    switch (status?.toLowerCase()) {
+      case "completed": 
+      case "succeeded": return "#21DD3D"; // Green
+      case "pending": return "#FDAE37";   // Orange
+      case "denied": 
+      case "failed": return "#EB4747";    // Red
+      case "active": return theme.colors.primary; // Blue
       default: return theme.colors.primary;
     }
   };
 
-  const getIconName = (type: string, status: string, penalty: number) => {
+  const getIconName = (type: string, status: string) => {
+    if (status === "denied" || status === "failed") return "alert-circle"; 
     if (type === "topup") return "wallet";
-    // Modified: Always return checkmark for completed, even if late
-    if (status === "completed") return "checkmark-circle";
-    if (status === "failed") return "close-circle";
-    return "time-outline"; // Active rent falls here
+    if (status === "completed" || status === "succeeded") return "checkmark-circle";
+    return "time-outline"; 
   };
 
-  // Helper for modal rows
   const DetailRow = ({label, value, color, bold}: any) => (
     <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
         <Text style={{color: color || theme.colors.onSurface, opacity: 0.8}}>{label}:</Text>
         <Text style={{color: color || theme.colors.onSurface, fontWeight: bold ? 'bold' : 'normal'}}>{value}</Text>
     </View>
   );
+
+  // --- MODAL CONTENT RENDERER ---
+  const renderModalContent = () => {
+    if (!selectedTxn) return null;
+
+    const isRent = selectedTxn.type === 'rent';
+    const isReturn = selectedTxn.type === 'return';
+    const isTopup = selectedTxn.type === 'topup';
+    const isDenied = selectedTxn.status === 'denied' || selectedTxn.status === 'failed';
+    const hasPenalty = selectedTxn.penaltyFee > 0;
+
+    // 1. Determine Label logic
+    let totalLabel = "Total Amount:"; // Always use this now as requested
+    
+    // 2. Determine Color logic
+    let totalColor = theme.colors.primary;
+    if (isDenied) totalColor = "#ccc";
+    else if (isReturn && hasPenalty) totalColor = theme.colors.error; 
+
+    return (
+      <View>
+        <Text variant="headlineSmall" style={[styles.modalTitle, { color: theme.colors.primary }]}>
+          Transaction Details
+        </Text>
+        <Divider style={{ marginVertical: 10, backgroundColor: "#d7d7d7ff" }} />
+        
+        <DetailRow label="Reference" value={selectedTxn.reference.slice(0, 15)} color={theme.colors.primary} />
+        <DetailRow label="Type" value={selectedTxn.type.toUpperCase()} color={theme.colors.primary} />
+        <DetailRow label="Date" value={selectedTxn.date.toLocaleString()} color={theme.colors.primary} />
+        
+        {/* ⭐ ADDED: Base Fee at Top */}
+        {(isReturn || isRent) && (
+             <DetailRow label="Base Fee" value={`₱ ${selectedTxn.fee}.00`} color={theme.colors.primary} />
+        )}
+
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
+            <Text style={{color: theme.colors.primary, opacity: 0.8}}>Status:</Text>
+            <Text style={{color: getStatusColor(selectedTxn.status), fontWeight: 'bold'}}>
+                {selectedTxn.status.toUpperCase()}
+            </Text>
+        </View>
+
+        {/* --- RETURN DETAILS --- */}
+        {isReturn && (
+          <View style={styles.penaltyContainer}>
+            <Text style={{color: theme.colors.onSurfaceVariant, marginBottom: 8, fontWeight: 'bold'}}>
+                Usage Breakdown
+            </Text>
+            <DetailRow label="Allowed Duration" value={`${selectedTxn.allowedMinutes} mins`} color={theme.colors.primary} />
+            <DetailRow label="Time Used" value={`${selectedTxn.usedMinutes} mins`} color={theme.colors.primary} />
+            
+            {hasPenalty ? (
+                <>
+                    <Divider style={{marginVertical: 6, backgroundColor: "#d7d7d7ff"}} />
+                    <DetailRow label="Overdue By" value={`${selectedTxn.overdueMinutes} mins`} color={theme.colors.error} bold />
+                    {/* ⭐ ADDED: Penalty Fee in Breakdown */}
+                    <DetailRow label="Penalty Fee" value={`+ ₱ ${selectedTxn.penaltyFee}.00`} color={theme.colors.error} bold />
+                </>
+            ) : (
+                <Text style={{color: '#21DD3D', fontStyle: 'italic', marginTop: 4, marginBottom: 8, textAlign: 'center'}}>
+                    Returned within time limit.
+                </Text>
+            )}
+          </View>
+        )}
+
+
+        <Divider style={{ marginVertical: 15, backgroundColor: "#d7d7d7ff" }} />
+        
+        {/* --- TOTAL ROW --- */}
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <Text style={{fontSize: 18, color: theme.colors.primary}}>
+                {totalLabel}
+            </Text>
+            <Text style={{fontSize: 24, fontWeight: 'bold', color: totalColor }}>
+                <Text style={isDenied ? {textDecorationLine: 'line-through'} : {}}>
+                    ₱ {selectedTxn.amount.toLocaleString("en-PH")}
+                </Text>
+            </Text>
+        </View>
+
+        <Button
+          mode="contained"
+          style={{ marginTop: 20 }}
+          onPress={() => setSelectedTxn(null)}
+          buttonColor={theme.colors.primary}
+          textColor={theme.colors.onPrimary}
+        >
+          Close
+        </Button>
+      </View>
+    );
+  };
 
   return (
     <LinearGradient
@@ -184,9 +265,8 @@ export default function TransactionHistory() {
                 >
                   <Card.Content style={styles.cardContent}>
                     <Ionicons
-                      name={getIconName(item.type, item.status, item.penaltyFee)}
+                      name={getIconName(item.type, item.status)}
                       size={28}
-                      // Modified: Use standard status color (green for completed)
                       color={getStatusColor(item.status)}
                       style={{ marginRight: 12 }}
                     />
@@ -204,26 +284,16 @@ export default function TransactionHistory() {
                       </Text>
                     </View>
                     
-                    {/* Amount / Status Display */}
                     <View style={{ alignItems: 'flex-end' }}>
-                        {item.status === 'active' ? (
-                            <Text style={[styles.fee, { color: theme.colors.primary }]}>
-                                Active
+                        {item.status === 'denied' ? (
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#EB4747' }}>
+                                DENIED
                             </Text>
-                        ) : item.type === 'return' ? (
-                            // Return Transaction Logic
-                            <>
-                                <Text style={[styles.fee, { color: theme.colors.primary }]}>
-                                    Completed
-                                </Text>
-                                {item.penaltyFee > 0 && (
-                                    <Text style={{ fontSize: 11, color: theme.colors.error, fontWeight: '600' }}>
-                                        Penalty: ₱ {item.amount.toLocaleString("en-PH")}
-                                    </Text>
-                                )}
-                            </>
+                        ) : item.status === 'active' ? (
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: theme.colors.primary }}>
+                                ACTIVE
+                            </Text>
                         ) : (
-                            // Rent (Initial Fee) or Topup
                             <Text style={[styles.fee, { color: theme.colors.primary }]}>
                                 ₱ {item.amount.toLocaleString("en-PH")}
                             </Text>
@@ -236,7 +306,6 @@ export default function TransactionHistory() {
           />
         )}
 
-        {/* --- DETAILS MODAL --- */}
         <Portal>
           <Modal
             visible={!!selectedTxn}
@@ -246,96 +315,7 @@ export default function TransactionHistory() {
               { backgroundColor: theme.colors.onPrimary },
             ]}
           >
-            {selectedTxn && (
-              <View>
-                <Text
-                  variant="headlineSmall"
-                  style={[styles.modalTitle, { color: theme.colors.primary }]}
-                >
-                  Transaction Details
-                </Text>
-                <Divider style={{ marginVertical: 10, backgroundColor: "#d7d7d7ff" }} />
-                
-                <DetailRow label="Reference" value={selectedTxn.reference.slice(0, 10) + "..."} color={theme.colors.primary} />
-                <DetailRow label="Type" value={selectedTxn.type.toUpperCase()} color={theme.colors.primary} />
-                <DetailRow label="Date" value={selectedTxn.date.toLocaleString()} color={theme.colors.primary} />
-
-                {/* --- RENTAL / RETURN BREAKDOWN --- */}
-                {selectedTxn.type === 'return' && (
-                  <View style={styles.penaltyContainer}>
-                    <Text style={{color: theme.colors.onSurfaceVariant, marginBottom: 8, fontWeight: 'bold'}}>Usage Breakdown</Text>
-                    
-                    <DetailRow label="Allowed Duration" value={`${selectedTxn.allowedMinutes} mins`} color={theme.colors.primary} />
-                    <DetailRow label="Time Used" value={`${selectedTxn.usedMinutes} mins`} color={theme.colors.primary} />
-                    
-                    {selectedTxn.overdueMinutes > 0 ? (
-                        <>
-                            <Divider style={{marginVertical: 6, backgroundColor: "#d7d7d7ff"}} />
-                            <DetailRow 
-                                label="Overdue By" 
-                                value={`${selectedTxn.overdueMinutes} mins`} 
-                                color={theme.colors.error} 
-                                bold 
-                            />
-                        </>
-                    ) : (
-                        <Text style={{color: '#21DD3D', fontStyle: 'italic', marginTop: 4, marginBottom: 8, textAlign: 'center'}}>Returned within time limit.</Text>
-                    )}
-
-                    {/* NEW: Payment Breakdown Section */}
-                    {(selectedTxn.penaltyFee > 0) && (
-                        <>
-                            <Divider style={{marginVertical: 8, backgroundColor: "#d7d7d7ff"}} />
-                            <Text style={{color: theme.colors.onSurfaceVariant, marginBottom: 8, fontWeight: 'bold'}}>Payment Details</Text>
-                            
-                            <DetailRow 
-                                label="Total Penalty" 
-                                value={`₱ ${selectedTxn.penaltyFee.toFixed(2)}`} 
-                                color={theme.colors.error} 
-                                bold
-                            />
-
-                            <DetailRow 
-                                label="Paid from Wallet" 
-                                value={`₱ ${selectedTxn.amountPaid.toFixed(2)}`} 
-                                color={theme.colors.primary} 
-                            />
-
-                            {selectedTxn.debtIncurred > 0 && (
-                                <DetailRow 
-                                    label="Added to Debt" 
-                                    value={`₱ ${selectedTxn.debtIncurred.toFixed(2)}`} 
-                                    color={theme.colors.error} 
-                                    bold 
-                                />
-                            )}
-                        </>
-                    )}
-                  </View>
-                )}
-
-                <Divider style={{ marginVertical: 15, backgroundColor: "#d7d7d7ff" }} />
-                
-                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <Text style={{fontSize: 18, color: theme.colors.primary}}>
-                        {selectedTxn.type === 'return' ? "Total Penalty:" : "Total Amount:"}
-                    </Text>
-                    <Text style={{fontSize: 24, fontWeight: 'bold', color: selectedTxn.penaltyFee > 0 ? theme.colors.error : theme.colors.primary}}>
-                        ₱ {selectedTxn.amount.toLocaleString("en-PH")}
-                    </Text>
-                </View>
-
-                <Button
-                  mode="contained"
-                  style={{ marginTop: 20 }}
-                  onPress={() => setSelectedTxn(null)}
-                  buttonColor={theme.colors.primary}
-                  textColor={theme.colors.onPrimary}
-                >
-                  Close
-                </Button>
-              </View>
-            )}
+            {renderModalContent()}
           </Modal>
         </Portal>
       </SafeAreaView>

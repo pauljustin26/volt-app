@@ -45,27 +45,32 @@ export default function VoltsList() {
 
   // Load all volts
   useEffect(() => {
-    // Listener for all volts
-    const voltsQuery = collection(db, "volts");
-    let unsubscribeVolts: Unsubscribe = () => {};
-    let unsubscribeRentals: Unsubscribe = () => {};
+    // 1. Define unsubscribe variables
+    let unsubscribeVolts: Unsubscribe | null = null;
+    let unsubscribeRentals: Unsubscribe | null = null;
 
-    unsubscribeVolts = onSnapshot(voltsQuery, (snapshot) => {
-      const voltsData: any[] = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
-      setVolts(voltsData);
-      setLoading(false);
-    }, (error) => {
-        if (error.code === 'permission-denied') setVolts([]);
-        console.error("Volts listener error:", error.message);
-        setLoading(false);
-    });
-
-    // Listener for user rentals (Only runs if user is present)
+    // 2. Only set up listeners if user is logged in
     const user = auth.currentUser;
+
     if (user) {
+        // --- Listener A: All Volts ---
+        const voltsQuery = collection(db, "volts");
+        unsubscribeVolts = onSnapshot(voltsQuery, (snapshot) => {
+            const voltsData: any[] = snapshot.docs.map((docSnap) => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+            }));
+            setVolts(voltsData);
+            setLoading(false);
+        }, (error) => {
+            // Gracefully handle permission errors during logout
+            if (error.code !== 'permission-denied') {
+                console.error("Volts listener error:", error.message);
+            }
+            setLoading(false);
+        });
+
+        // --- Listener B: My Rentals ---
         const rentalsQuery = collection(db, "volts");
         unsubscribeRentals = onSnapshot(rentalsQuery, (snapshot) => {
             const rentalData = snapshot.docs
@@ -73,19 +78,25 @@ export default function VoltsList() {
                 .filter((volt) => volt.studentUID === user.uid && volt.status === "rented");
             setMyRentals(rentalData);
         }, (error) => {
-            if (error.code === 'permission-denied') setMyRentals([]);
-            console.error("MyRentals listener error:", error.message);
+             // Gracefully handle permission errors during logout
+            if (error.code !== 'permission-denied') {
+                console.error("MyRentals listener error:", error.message);
+            }
         });
+    } else {
+        // If no user, ensure state is clear and not loading
+        setVolts([]);
+        setMyRentals([]);
+        setLoading(false);
     }
 
-
-    // CRITICAL CLEANUP: Unsubscribe all listeners
+    // 3. CLEANUP FUNCTION
     return () => {
-        unsubscribeVolts();
-        unsubscribeRentals();
+      if (unsubscribeVolts) unsubscribeVolts();
+      if (unsubscribeRentals) unsubscribeRentals();
     };
 
-  }, [auth.currentUser]);
+  }, [auth.currentUser]); // Re-run if auth state changes
 
   const handleRent = async (volt: any) => {
     if (!auth.currentUser) {
@@ -251,7 +262,7 @@ const AvailableRoute = () => {
             Available Units
           </Text>
            <Text style={[styles.cardSubtitle, { color: theme.colors.primary }]}>
-            Select`` to Rent:
+            Select to Rent:
           </Text>
           <View style={{ marginTop: 8 }}>
             {renderVoltPills(availableVolts)}

@@ -1,6 +1,6 @@
-import React, { useState } from "react";
 import { useRouter } from "expo-router";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth"; 
+import React, { useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   KeyboardAvoidingView,
@@ -8,21 +8,80 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  Image,
+  TextInput as RNTextInput,
+  TouchableOpacity
 } from "react-native";
 import {
   ActivityIndicator,
-  Button,
-  Snackbar,
   Text,
-  TextInput,
-  useTheme,
-  IconButton,
+  Snackbar,
 } from "react-native-paper";
+import { Ionicons } from "@expo/vector-icons";
+
+// --- HARDCODED COLORS (MATCHING SYSTEM) ---
+const COLORS = {
+  gradient: ["#03040D", "#172647", "#172647", "#38466D", "#38466D"],
+  background: "#172647",    // Surface color
+  text: "#FFFFFF",          // Main text
+  subText: "#adb5bd",       // Hints
+  placeholders: "#adb5bd",  // Placeholders
+  primary: "#38466D",       // Button color
+  secondary: "#FDAE37",     // Secondary/Orange
+  error: "#E07A5F",         // Error Red
+  inputText: "#172647",     // Black text for inputs
+  inputBg: "#FFFFFF",       // White background for inputs
+  white: "#FFFFFF",
+};
+
+// --- CUSTOM INPUT COMPONENT ---
+const CustomInput = ({ 
+  label, value, onChangeText, error, onBlur, onFocus, 
+  keyboardType, placeholder, suffix 
+}: any) => {
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <Text style={{ 
+        color: COLORS.subText,
+        fontSize: 12, 
+        fontWeight: "700", 
+        marginBottom: 6,
+        marginLeft: 4,
+        textTransform: 'uppercase',
+        opacity: 0.9
+      }}>
+        {label}
+      </Text>
+      <View style={[
+        styles.inputContainer,
+        { backgroundColor: COLORS.inputBg },
+        error && { borderColor: COLORS.error, borderWidth: 1 }
+      ]}>
+        <RNTextInput
+          style={[styles.inputField, { color: COLORS.inputText }]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.placeholders}
+          onBlur={onBlur}
+          onFocus={onFocus}
+          keyboardType={keyboardType}
+          autoCapitalize="none"
+        />
+        {suffix && <Text style={{ color: COLORS.subText, marginRight: 10 }}>{suffix}</Text>}
+      </View>
+      {error ? (
+        <Text style={{ color: COLORS.error, fontSize: 11, marginLeft: 4, marginTop: 4 }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+};
 
 const auth = getAuth();
 
 export default function PasswordReset() {
-  const theme = useTheme();
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -31,14 +90,14 @@ export default function PasswordReset() {
   // --- Snackbar State ---
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [snackbarColor, setSnackbarColor] = useState(theme.colors.primary);
+  const [snackbarColor, setSnackbarColor] = useState(COLORS.primary);
 
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
   // --- Helpers ---
   const showMessage = (message: string, isError: boolean = true) => {
     setSnackbarMessage(message);
-    setSnackbarColor(isError ? theme.colors.error : theme.colors.primary);
+    setSnackbarColor(isError ? COLORS.error : "#4CAF50");
     setSnackbarVisible(true);
   };
 
@@ -54,7 +113,6 @@ export default function PasswordReset() {
       const fullEmail = `${email.trim().toLowerCase()}@cvsu.edu.ph`;
 
       // 2. CHECK WITH BACKEND FIRST
-      // We ask the backend: "Does this user actually exist in Firestore?"
       const checkRes = await fetch(`${API_URL}/auth/check-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,7 +120,6 @@ export default function PasswordReset() {
       });
 
       if (!checkRes.ok) {
-        // If backend says 400/404, the user doesn't exist
         throw new Error("This email is not registered in our system.");
       }
       
@@ -70,18 +127,14 @@ export default function PasswordReset() {
       await sendPasswordResetEmail(auth, fullEmail);
       
       showMessage("Password reset link sent! Check your inbox.", false);
-      
-      // Optional: Clear input on success
-      setEmail("");
+      setEmail(""); // Clear input on success
+      setTimeout(() => router.back(), 3000); // Auto go back after success
 
     } catch (e: any) {
       console.log(e);
       let msg = e.message || "Failed to send reset email.";
-      
-      // Handle Firebase specific errors just in case
       if (e.code === 'auth/user-not-found') msg = "No user found with this email.";
       if (e.code === 'auth/invalid-email') msg = "Invalid email format.";
-      
       showMessage(msg, true);
     } finally {
       setLoading(false);
@@ -90,7 +143,7 @@ export default function PasswordReset() {
 
   return (
     <LinearGradient
-      colors={(theme.colors as any).gradientColors || ['#4c669f', '#3b5998', '#192f6a']}
+      colors={COLORS.gradient as any}
       style={styles.container}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -99,82 +152,64 @@ export default function PasswordReset() {
         style={styles.keyboardView}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        {/* Back Button */}
-        <View style={styles.header}>
-            <IconButton 
-                icon="arrow-left" 
-                iconColor="#FFFFFF" 
-                size={28} 
-                onPress={() => router.push("/login")} 
-            />
-        </View>
+        {/* Top Back Button */}
+        <TouchableOpacity style={styles.topBackButton} onPress={() => router.back()}>
+           <Ionicons name="arrow-back" size={28} color={COLORS.white} />
+        </TouchableOpacity>
 
         <ScrollView 
             contentContainerStyle={styles.scrollContent} 
             showsVerticalScrollIndicator={false} 
             keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.inner}>
-            
-            <Text variant="headlineMedium" style={[styles.title, { color: "#FFFFFF" }]}>
+          
+          {/* Header Section */}
+          <View style={styles.headerContainer}>
+            <Image
+              source={require("../../assets/images/white-logo.png")}
+              resizeMode="contain"
+              style={styles.logo}
+            />
+            <Text style={[styles.headerSubtitle, { color: COLORS.text }]}>
               Reset your password
             </Text>
+          </View>
 
-            <Text variant="bodyLarge" style={[styles.description, { color: "#FFFFFF" }]}>
-              Enter your user account's verified email address and we will send you a password reset link.
+          {/* Card Section */}
+          <View style={[styles.card, { backgroundColor: COLORS.background }]}>
+            
+            <Text style={{ color: COLORS.subText, marginBottom: 24, textAlign: 'center', lineHeight: 22 }}>
+               Enter your CVSU email below. We'll check if the account exists and send a reset link to your email.
             </Text>
 
-            {/* Email Input with Suffix Overlay */}
-            <View style={{ position: "relative", width: "100%", marginTop: 20 }}>
-              <TextInput
-                placeholder="Email"
-                value={email}
-                onChangeText={(text) => {
-                  const clean = text.replace(/@.*/, "");
-                  setEmail(clean);
-                }}
-                mode="outlined"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                style={styles.input}
-                theme={{
-                  colors: {
-                    primary: theme.colors.onSurface,
-                    text: theme.colors.onSurface,
-                    placeholder: theme.colors.onSurface,
-                    background: "transparent",
-                    onSurfaceVariant: "#FFFFFF",
-                    outline: "#FFFFFF",
-                  },
-                  roundness: 15,
-                }}
-              />
-              <Text
-                style={{
-                  position: "absolute",
-                  right: 15,
-                  top: 20, 
-                  color: "#FFFFFF",
-                  opacity: 0.8,
-                  fontSize: 16,
-                }}
-              >
-                @cvsu.edu.ph
-              </Text>
-            </View>
+            <CustomInput
+               label="CVSU Email"
+               value={email}
+               onChangeText={(text: string) => setEmail(text.replace(/@.*/, ""))}
+               suffix="@cvsu.edu.ph"
+               keyboardType="email-address"
+               placeholder="username"
+            />
 
             {loading ? (
-              <ActivityIndicator animating size="large" color="#FFFFFF" style={{ marginTop: 20 }} />
+              <ActivityIndicator animating={true} color={COLORS.secondary} size="large" style={{ marginTop: 20 }} />
             ) : (
-              <Button
-                mode="contained"
-                onPress={handleSendResetEmail}
-                style={styles.button}
-                buttonColor={theme.colors.secondary}
-                textColor={theme.colors.onPrimary}
-              >
-                Send password reset email
-              </Button>
+              <View style={{ marginTop: 10 }}>
+                {/* Primary Action */}
+                <TouchableOpacity
+                  style={[styles.primaryButton, { backgroundColor: COLORS.text }]}
+                  onPress={handleSendResetEmail}
+                >
+                  <Text style={styles.primaryButtonText}>Send Reset Link</Text>
+                </TouchableOpacity>
+
+                {/* Secondary Action */}
+                <TouchableOpacity onPress={() => router.back()} style={styles.secondaryButton}>
+                  <Text style={[styles.secondaryButtonText, { color: COLORS.secondary }]}>
+                    Remembered it? <Text style={{fontWeight: 'bold'}}>Login</Text>
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
 
           </View>
@@ -184,21 +219,9 @@ export default function PasswordReset() {
           visible={snackbarVisible}
           onDismiss={() => setSnackbarVisible(false)}
           duration={3000}
-          style={{
-            backgroundColor: snackbarColor,
-            borderRadius: 10,
-            margin: 16,
-            marginBottom: 20,
-          }}
-          action={{
-            label: "Close",
-            onPress: () => setSnackbarVisible(false),
-            textColor: theme.colors.onPrimary,
-          }}
+          style={{ backgroundColor: snackbarColor, borderRadius: 12, marginBottom: 30 }}
         >
-          <Text style={{ color: theme.colors.onPrimary, fontWeight: "bold" }}>
-            {snackbarMessage}
-          </Text>
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>{snackbarMessage}</Text>
         </Snackbar>
       </KeyboardAvoidingView>
     </LinearGradient>
@@ -206,13 +229,81 @@ export default function PasswordReset() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  keyboardView: { flex: 1 },
-  header: { paddingTop: 50, paddingHorizontal: 10 },
-  scrollContent: { flexGrow: 1, padding: 20 },
-  inner: { flex: 1, justifyContent: "center", marginTop: -80 },
-  title: { textAlign: "left", marginBottom: 10, fontWeight: "bold" },
-  description: { textAlign: "left", marginBottom: 10, opacity: 0.9, lineHeight: 24 },
-  input: { marginBottom: 10 },
-  button: { marginTop: 20, borderRadius: 15, paddingVertical: 6, elevation: 4 },
+  container: {
+    flex: 1,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  topBackButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    padding: 8
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: 24,
+  },
+  headerContainer: {
+    alignItems: "center",
+    marginBottom: 30,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    marginBottom: 16,
+  },
+  headerSubtitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  card: {
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 54,
+    borderWidth: 1.5,
+  },
+  inputField: {
+    flex: 1,
+    fontSize: 16,
+    height: '100%',
+  },
+  primaryButton: {
+    height: 48,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  primaryButtonText: {
+    color: '#172647',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  secondaryButton: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+  },
 });

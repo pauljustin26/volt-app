@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { StyleSheet, Image, View, TouchableOpacity, Share, ScrollView, Linking, Platform, Modal } from "react-native"; 
+import { StyleSheet, Image, View, TouchableOpacity, ScrollView, Platform, Modal } from "react-native"; 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { 
   Text, 
@@ -15,17 +15,22 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import axios from "axios";
 import { getAuth } from "firebase/auth";
-import { collection, query, where, orderBy, onSnapshot, Unsubscribe } from "firebase/firestore";
+import { collection, query, where, orderBy, onSnapshot, Unsubscribe, doc } from "firebase/firestore";
 import { db } from "../../config/firebaseConfig"; 
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import * as ExpoLinking from 'expo-linking';
-// ⭐ Import WebView
 import { WebView } from 'react-native-webview';
+
+// ⭐ FIXED IMPORTS FOR SDK 52+
+// We use the 'legacy' import to access downloadAsync without errors
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-const QR_IMAGES = {
+// Fallback local images if admin hasn't uploaded anything
+const LOCAL_QR_IMAGES = {
   gcash: require("../../assets/images/gcash-qr.jpg"),
   maya: require("../../assets/images/maya-qr.jpg"),
 };
@@ -51,20 +56,29 @@ export default function RechargeGcashScreen() {
   const [latestTxn, setLatestTxn] = useState<any | null>(null);
   const [snackbar, setSnackbar] = useState({ visible: false, message: '', isError: false });
   
-  // ⭐ Lightbox State
+  // Lightbox State
   const [lightboxVisible, setLightboxVisible] = useState(false);
 
-  // ⭐ PayMongo WebView State
+  // PayMongo WebView State
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+
+  // Dynamic Config State
+  const [paymentConfig, setPaymentConfig] = useState({
+    gcashNumber: "",
+    mayaNumber: "",
+    gcashQrUrl: null,
+    mayaQrUrl: null
+  });
+  const [configLoading, setConfigLoading] = useState(true);
 
   const authInstance = getAuth();
   const user = authInstance.currentUser;
 
+  // 1. Listen for Pending Transactions
   useEffect(() => {
     let unsubscribe: Unsubscribe = () => {};
     
     if (user) {
-        // Only track manual pending transactions for blocking
         const q = query(
             collection(db, "transactions"),
             where("userId", "==", user.uid),
@@ -82,34 +96,141 @@ export default function RechargeGcashScreen() {
                 setLatestTxn(null);
             }
         }, (error) => {
-            // Ignore index errors
+            console.log("Transaction listener:", error.message);
         });
     }
 
     return () => unsubscribe();
   }, [user?.uid]);
 
+  // 2. LISTEN to Payment Config (Real-time)
+  useEffect(() => {
+    let unsubscribeConfig: Unsubscribe = () => {};
+
+    if (user) {
+      const configRef = doc(db, "settings", "config");
+
+      unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setPaymentConfig({
+            gcashNumber: data.gcashNumber || "",
+            mayaNumber: data.mayaNumber || "",
+            gcashQrUrl: data.gcashQrUrl || null,
+            mayaQrUrl: data.mayaQrUrl || null
+          });
+        }
+        setConfigLoading(false);
+      }, (error) => {
+        console.error("Failed to listen to config:", error);
+        setConfigLoading(false);
+      });
+    }
+
+    return () => unsubscribeConfig();
+  }, [user]);
+
   const showAlert = (message: string, isError = false) => {
     setSnackbar({ visible: true, message, isError });
   };
 
-  // ⭐ UPDATE THE WEB RETURN HANDLER
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      // 1. Get the current URL
-      const currentUrl = new URL(window.location.href);
-      const params = new URLSearchParams(currentUrl.search);
-      const status = params.get('status');
-
-      // 2. Check for Cancel
-      if (status === 'cancelled') {
-         showAlert("Payment Cancelled", true);
-         
-         // Optional: Clean the URL so a refresh doesn't show the alert again
-         window.history.replaceState({}, '', '/wallet/recharge');
-      }
+  // 3. Helper: Get Current QR Source
+  const getQrSource = () => {
+    if (paymentMethod === 'gcash') {
+       return paymentConfig.gcashQrUrl 
+         ? { uri: paymentConfig.gcashQrUrl } 
+         : LOCAL_QR_IMAGES.gcash;
+    } else {
+       return paymentConfig.mayaQrUrl 
+         ? { uri: paymentConfig.mayaQrUrl } 
+         : LOCAL_QR_IMAGES.maya;
     }
-  }, []);
+  };
+
+  const getAccountNumber = () => {
+    return paymentMethod === 'gcash' 
+      ? paymentConfig.gcashNumber 
+      : paymentConfig.mayaNumber;
+  };
+
+  // ---------------------------------------------------------
+  // ⭐ FILE HANDLING LOGIC (Fixed for SDK 52)
+  // ---------------------------------------------------------
+  
+  const getLocalImageUri = async () => {
+    const source = getQrSource();
+    let url = "";
+
+    if ((source as any).uri) {
+      url = (source as any).uri;
+    } else {
+      url = Image.resolveAssetSource(source).uri;
+    }
+
+    // Use legacy cacheDirectory safely
+    const fileUri = (FileSystem.cacheDirectory || "") + "temp_qr_code.jpg";
+
+    try {
+      // Using legacy downloadAsync
+      const { uri } = await FileSystem.downloadAsync(url, fileUri);
+      return uri;
+    } catch (e) {
+      console.error("Download error:", e);
+      return null;
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    if (Platform.OS === 'web') {
+      showAlert("Please right-click and save on web.", false);
+      return;
+    }
+
+    try {
+      // 1. Try requesting permissions (Write Only)
+      const { status } = await MediaLibrary.requestPermissionsAsync(true);
+      
+      if (status !== 'granted') {
+        // If rejected (common in Expo Go), fallback to Sharing
+        showAlert("Opening share sheet to save...", false);
+        await handleShareImage(); 
+        return;
+      }
+
+      const localUri = await getLocalImageUri();
+      if (localUri) {
+        await MediaLibrary.saveToLibraryAsync(localUri);
+        showAlert("QR Code saved to Gallery!", false);
+      } else {
+        showAlert("Failed to download image.", true);
+      }
+    } catch (error) {
+      console.log("Permission/Save error:", error);
+      // Fallback to share sheet on error
+      showAlert("Could not access gallery. Sharing instead.", false);
+      await handleShareImage();
+    }
+  };
+
+  const handleShareImage = async () => {
+    if (Platform.OS === 'web') return;
+
+    try {
+      const localUri = await getLocalImageUri();
+      
+      if (localUri && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: 'image/jpeg',
+          dialogTitle: 'Save or Share QR Code'
+        });
+      } else {
+        showAlert("Sharing is not available on this device.", true);
+      }
+    } catch (error) {
+      console.error(error);
+      showAlert("Error sharing image.", true);
+    }
+  };
 
   // --- ONLINE PAYMENT (PayMongo) ---
   const handlePayMongo = async () => {
@@ -119,25 +240,11 @@ export default function RechargeGcashScreen() {
     setLoading(true);
     try {
         const token = await user?.getIdToken();
-        
-        let redirectBaseUrl = "";
-        
-        if (Platform.OS === 'web') {
-            // Web: Use the real browser URL (e.g. localhost:8081)
-            redirectBaseUrl = window.location.origin; 
-        } else {
-            // ⭐ MOBILE FIX: Use a hardcoded HTTP URL.
-            // We use this "dummy" URL so PayMongo accepts it.
-            // The WebView will intercept this URL before it actually loads.
-            redirectBaseUrl = "https://voltvault.com"; 
-        }
+        const redirectBaseUrl = Platform.OS === 'web' ? window.location.origin : "https://voltvault.com";
 
         const res = await axios.post(
             `${API_URL}/wallet/topup-online`,
-            { 
-                amount: amountValue,
-                redirectBaseUrl: redirectBaseUrl 
-            },
+            { amount: amountValue, redirectBaseUrl },
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -156,40 +263,31 @@ export default function RechargeGcashScreen() {
     }
   };
 
-  // ⭐ Handle WebView Navigation (Success/Cancel interception)
   const handleWebViewNavigation = (navState: any) => {
     const { url } = navState;
     if (!url) return;
 
-    // 1. SUCCESS: Navigate to Status Screen
     if (url.includes('/wallet/status') && url.includes('succeeded')) { 
-        setPaymentUrl(null); // Close WebView
+        setPaymentUrl(null); 
         setAmount("");
-        
-        // Extract amount from URL safely using Regex
         const amountMatch = url.match(/amount=([^&]*)/);
         const extractedAmount = amountMatch ? amountMatch[1] : "0";
 
-        // Navigate to Status Screen
         router.replace({
             pathname: "/wallet/status",
             params: { 
                 status: 'succeeded', 
                 amount: extractedAmount,
-                // We use a placeholder ID because the real ID is created 
-                // asynchronously by your Webhook.
                 txnId: 'online_success_pending_webhook' 
             }
         });
     } 
-    // 2. CANCEL: Stay on Recharge Screen
     else if (url.includes('/wallet/recharge') && url.includes('cancelled')) {
-        setPaymentUrl(null); // Close WebView
+        setPaymentUrl(null); 
         showAlert("Payment Cancelled", true);
     }
   };
 
-  // --- MANUAL PAYMENT ---
   const pickReceipt = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return showAlert("Permission required to pick image", true);
@@ -265,22 +363,7 @@ export default function RechargeGcashScreen() {
       setLoading(false);
     }
   };
-
-  const downloadQR = async () => {
-    if (Platform.OS === 'web') {
-       showAlert("Please save the image manually on web.", false);
-       return;
-    }
-    
-    const url = Image.resolveAssetSource(QR_IMAGES[paymentMethod]).uri;
-    try {
-      await Share.share({
-        url,
-        message: `Scan this QR to pay.`,
-      });
-    } catch (err) {}
-  };
-  
+ 
   const isFormDisabled = loading || !!latestTxn;
 
   return (
@@ -351,31 +434,47 @@ export default function RechargeGcashScreen() {
                 
                 <View style={styles.segmentedControlContainer}>
                     <TouchableOpacity
-                    onPress={() => setPaymentMethod('gcash')}
-                    style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'gcash' ? theme.colors.primary : theme.colors.onPrimary }]}
-                    disabled={isFormDisabled}
+                        onPress={() => setPaymentMethod('gcash')}
+                        style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'gcash' ? theme.colors.primary : theme.colors.onPrimary }]}
+                        disabled={isFormDisabled}
                     >
-                    <Text style={[styles.segmentText, { color: paymentMethod === 'gcash' ? theme.colors.onPrimary : theme.colors.primary }]}>GCash</Text>
+                        <Text style={[styles.segmentText, { color: paymentMethod === 'gcash' ? theme.colors.onPrimary : theme.colors.primary }]}>GCash</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                    onPress={() => setPaymentMethod('maya')}
-                    style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'maya' ? theme.colors.primary : theme.colors.onPrimary }]}
-                    disabled={isFormDisabled}
+                        onPress={() => setPaymentMethod('maya')}
+                        style={[styles.segmentedButton, { borderColor: theme.colors.primary, backgroundColor: paymentMethod === 'maya' ? theme.colors.primary : theme.colors.onPrimary }]}
+                        disabled={isFormDisabled}
                     >
-                    <Text style={[styles.segmentText, { color: paymentMethod === 'maya' ? theme.colors.onPrimary : theme.colors.primary }]}>Maya</Text>
+                        <Text style={[styles.segmentText, { color: paymentMethod === 'maya' ? theme.colors.onPrimary : theme.colors.primary }]}>Maya</Text>
                     </TouchableOpacity>
                 </View>
 
                 <Text style={[styles.cardTitle, { color: theme.colors.primary, marginTop: 20 }]}>2. Scan & Pay</Text>
                 
-                {/* ⭐ Lightbox Trigger */}
+                {/* QR Section */}
                 <TouchableOpacity 
                     onPress={() => setLightboxVisible(true)} 
                     style={styles.qrContainer} 
-                    disabled={isFormDisabled}
+                    disabled={isFormDisabled || configLoading}
                 >
-                    <Image source={QR_IMAGES[paymentMethod]} style={styles.qr} resizeMode="contain" />
-                    <Text style={{ textAlign: "center", marginTop: 5, color: theme.colors.primary, fontSize: 12 }}>
+                    {configLoading ? (
+                      <ActivityIndicator animating={true} color={theme.colors.primary} style={{ height: 200 }} />
+                    ) : (
+                      <>
+                        <Image source={getQrSource()} style={styles.qr} resizeMode="contain" />
+                        
+                        <View style={{ alignItems: 'center', marginTop: 10 }}>
+                          <Text style={{ color: theme.colors.secondary, fontWeight: 'bold', fontSize: 18 }}>
+                            {getAccountNumber() || "No Number Set"}
+                          </Text>
+                          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+                            Account Number
+                          </Text>
+                        </View>
+                      </>
+                    )}
+                    
+                    <Text style={{ textAlign: "center", marginTop: 15, color: theme.colors.primary, fontSize: 12 }}>
                         Tap to expand & share
                     </Text>
                 </TouchableOpacity>
@@ -413,7 +512,6 @@ export default function RechargeGcashScreen() {
                 </Card.Content>
             </Card>
           ) : (
-            
             /* -------------- ONLINE MODE UI -------------- */
             <Card style={[styles.card, { backgroundColor: theme.colors.onPrimary }]}>
                 <Card.Content>
@@ -465,7 +563,6 @@ export default function RechargeGcashScreen() {
         <Text style={{ color: theme.colors.onPrimary }}>{snackbar.message}</Text>
       </Snackbar>
 
-      {/* ⭐ Lightbox Modal */}
       <Modal
         visible={lightboxVisible}
         transparent={true}
@@ -477,26 +574,42 @@ export default function RechargeGcashScreen() {
           
           <View style={styles.lightboxContent}>
             <Image 
-                source={QR_IMAGES[paymentMethod]} 
+                source={getQrSource()} 
                 style={styles.lightboxImage} 
                 resizeMode="contain" 
             />
+            <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginTop: 15, marginBottom: 5 }}>
+               {getAccountNumber() || "No Number Set"}
+            </Text>
             
             <View style={styles.lightboxActions}>
+                {/* Save Button */}
+                <Button 
+                    mode="contained" 
+                    icon="download" 
+                    onPress={handleSaveToGallery}
+                    buttonColor={theme.colors.secondary}
+                    textColor={theme.colors.onSecondary}
+                    style={{ marginBottom: 10, width: 220 }}
+                >
+                    Save to Gallery
+                </Button>
+
+                {/* Share Button */}
                 <Button 
                     mode="contained" 
                     icon="share-variant" 
-                    onPress={downloadQR}
+                    onPress={handleShareImage}
                     buttonColor={theme.colors.primary}
                     textColor={theme.colors.onPrimary}
-                    style={{ marginBottom: 10, width: 200 }}
+                    style={{ marginBottom: 10, width: 220 }}
                 >
-                    Share QR
+                    Share Image
                 </Button>
                 
                 <Button 
                     mode="text" 
-                    textColor={theme.colors.primary}
+                    textColor="white"
                     onPress={() => setLightboxVisible(false)}
                 >
                     Close
@@ -506,14 +619,12 @@ export default function RechargeGcashScreen() {
         </View>
       </Modal>
 
-      {/* ⭐ Payment WebView Modal (In-App Browser) */}
       <Modal
         visible={!!paymentUrl}
         animationType="slide"
         onRequestClose={() => setPaymentUrl(null)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-            {/* Header with Close Button */}
             <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderColor: '#eee' }}>
                 <TouchableOpacity onPress={() => setPaymentUrl(null)} style={{ padding: 10 }}>
                      <Ionicons name="close" size={30} color="#000" />
@@ -521,7 +632,6 @@ export default function RechargeGcashScreen() {
                 <Text style={{ fontSize: 18, fontWeight: 'bold', marginLeft: 10 }}>Secure Payment</Text>
             </View>
 
-            {/* The Browser */}
             <WebView
                 source={{ uri: paymentUrl || '' }}
                 onNavigationStateChange={handleWebViewNavigation}
@@ -593,7 +703,7 @@ const styles = StyleSheet.create({
   },
   lightboxImage: {
     width: '100%',
-    height: '80%',
+    height: '60%',
     borderRadius: 10,
   },
   lightboxActions: {

@@ -88,10 +88,19 @@ export default function ProfileScreen() {
 
   const handleLogout = async () => {
     try {
+      // 1. Set loading to true or disable UI to prevent interaction
+      setLoading(true); 
+      
+      // 2. Sign out
       await auth.signOut();
-      router.replace("/login");
+      
+      // 3. IMMEDIATELY navigate away. 
+      // Do not try to update state (setUserData, etc) after this line.
+      router.replace("/login"); 
+      
     } catch (error) {
       console.error("Logout failed", error);
+      setLoading(false); // Only revert loading if it FAILED
     }
   };
 
