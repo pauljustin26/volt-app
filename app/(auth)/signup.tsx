@@ -360,7 +360,6 @@ export default function Signup() {
                   onChangeText={(t: string) => setFormData({ ...formData, firstName: t })}
                   onBlur={() => handleBlur("firstName")}
                   error={touchedFields.firstName && errors.firstName}
-                  placeholder="John"
                 />
               </View>
               <View style={{ flex: 1, marginLeft: 8 }}>
@@ -370,7 +369,6 @@ export default function Signup() {
                   onChangeText={(t: string) => setFormData({ ...formData, lastName: t })}
                   onBlur={() => handleBlur("lastName")}
                   error={touchedFields.lastName && errors.lastName}
-                  placeholder="Doe"
                 />
               </View>
             </View>
@@ -382,7 +380,6 @@ export default function Signup() {
               onBlur={() => handleBlur("mobileNumber")}
               error={touchedFields.mobileNumber && errors.mobileNumber}
               keyboardType="phone-pad"
-              placeholder="09123456789"
             />
 
             <CustomInput
