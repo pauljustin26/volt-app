@@ -7,7 +7,7 @@
     "icon": "./assets/images/app-icon.png",
     "scheme": "volt",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true, 
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -41,7 +41,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

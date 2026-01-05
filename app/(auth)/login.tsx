@@ -141,6 +141,13 @@ export default function Login() {
     });
     return unsubscribe;
   }, []);
+  
+  const handleEmailBlur = () => {
+    // Remove @ and anything after it when the user leaves the field
+    if (email.includes("@")) {
+      setEmail(email.replace(/@.*/, ""));
+    }
+  };
 
   const handleLogin = async () => {
     let valid = true;
@@ -235,10 +242,13 @@ export default function Login() {
             <CustomInput
               label="CVSU Email"
               value={email}
+              // FIX: Just set the text directly. Don't replace() here.
               onChangeText={(text: string) => {
-                setEmail(text.replace(/@.*/, ""));
+                setEmail(text); 
                 if (emailError) setEmailError("");
               }}
+              // FIX: Clean the input when they lose focus instead
+              onBlur={handleEmailBlur} 
               error={emailError}
               suffix="@cvsu.edu.ph"
               keyboardType="email-address"
