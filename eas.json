@@ -5,17 +5,42 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://volt-backend-e0ls.onrender.com",
+        "EXPO_PUBLIC_API_KEY": "AIzaSyAs4csHgNdwGa_4dqwwNQrAwkWJwoe1f-U",
+        "EXPO_PUBLIC_AUTH_DOMAIN": "voltvault-c1ba3.firebaseapp.com",
+        "EXPO_PUBLIC_PROJECT_ID": "voltvault-c1ba3",
+        "EXPO_PUBLIC_STORAGE_BUCKET": "voltvault-c1ba3.appspot.com",
+        "EXPO_PUBLIC_MESSAGING_SENDER_ID": "990271563269",
+        "EXPO_PUBLIC_APP_ID": "1:990271563269:web:c0cc05aaebfee2d72cde6c"
+      }
     },
     "preview": {
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://volt-backend-e0ls.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://volt-backend-e0ls.onrender.com",
+        "EXPO_PUBLIC_API_KEY": "AIzaSyAs4csHgNdwGa_4dqwwNQrAwkWJwoe1f-U",
+        "EXPO_PUBLIC_AUTH_DOMAIN": "voltvault-c1ba3.firebaseapp.com",
+        "EXPO_PUBLIC_PROJECT_ID": "voltvault-c1ba3",
+        "EXPO_PUBLIC_STORAGE_BUCKET": "voltvault-c1ba3.appspot.com",
+        "EXPO_PUBLIC_MESSAGING_SENDER_ID": "990271563269",
+        "EXPO_PUBLIC_APP_ID": "1:990271563269:web:c0cc05aaebfee2d72cde6c"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://volt-backend-e0ls.onrender.com",
+        "EXPO_PUBLIC_API_KEY": "AIzaSyAs4csHgNdwGa_4dqwwNQrAwkWJwoe1f-U",
+        "EXPO_PUBLIC_AUTH_DOMAIN": "voltvault-c1ba3.firebaseapp.com",
+        "EXPO_PUBLIC_PROJECT_ID": "voltvault-c1ba3",
+        "EXPO_PUBLIC_STORAGE_BUCKET": "voltvault-c1ba3.appspot.com",
+        "EXPO_PUBLIC_MESSAGING_SENDER_ID": "990271563269",
+        "EXPO_PUBLIC_APP_ID": "1:990271563269:web:c0cc05aaebfee2d72cde6c"
+      }
+    }
   },
   "submit": {
     "production": {}
