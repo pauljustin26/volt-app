@@ -9,6 +9,8 @@ import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { auth } from "../config/firebaseConfig";
 import { Provider as PaperProvider } from "react-native-paper";
+import { AutoLogoutWrapper } from "../components/AutoLogout";
+
 import {
   LightTheme,
   DarkThemeCustom,
@@ -24,7 +26,7 @@ const ThemeContext = createContext({
 export const useAppTheme = () => useContext(ThemeContext);
 
 export default function RootLayout() {
-  const [isDark, setIsDark] = useState(true); // control theme manually
+  const [isDark, setIsDark] = useState(true);
 
   const paperTheme = useMemo(
     () => (isDark ? DarkThemeCustom : LightTheme),
@@ -59,13 +61,18 @@ export default function RootLayout() {
       >
         <PaperProvider theme={paperTheme}>
           <NavigationThemeProvider value={navTheme}>
-            <Stack screenOptions={{ headerShown: false }}>
-              {user ? (
-                <Stack.Screen name="(tabs)" />
-              ) : (
-                <Stack.Screen name="(auth)" />
-              )}
-            </Stack>
+            
+            {/* 2. WRAP THE STACK HERE */}
+            <AutoLogoutWrapper>
+              <Stack screenOptions={{ headerShown: false }}>
+                {user ? (
+                  <Stack.Screen name="(tabs)" />
+                ) : (
+                  <Stack.Screen name="(auth)" />
+                )}
+              </Stack>
+            </AutoLogoutWrapper>
+            
             <StatusBar style={isDark ? "light" : "dark"} />
           </NavigationThemeProvider>
         </PaperProvider>

@@ -3,8 +3,12 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
-  sendEmailVerification
+  sendEmailVerification,
+  setPersistence,
+  browserSessionPersistence
 } from "firebase/auth";
+// 1. IMPORT FIRESTORE FUNCTIONS
+import { doc, getDoc } from "firebase/firestore"; 
 import React, { useEffect, useState } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -27,9 +31,9 @@ import {
   Button as PaperButton
 } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
-import { auth } from "../../config/firebaseConfig";
+// 2. IMPORT DB
+import { auth, db } from "../../config/firebaseConfig"; 
 
-// --- COLORS ---
 const COLORS = {
   gradient: ["#03040D", "#172647", "#172647", "#38466D", "#38466D"],
   background: "#172647",
@@ -44,7 +48,6 @@ const COLORS = {
   white: "#FFFFFF",
 };
 
-// --- INPUT COMPONENT ---
 const CustomInput = ({ 
   label, value, onChangeText, error, onBlur, onFocus, 
   secureTextEntry, rightIcon, keyboardType, placeholder, suffix 
@@ -71,7 +74,7 @@ const CustomInput = ({
           style={[
             styles.inputField, 
             { color: COLORS.inputText },
-            // @ts-ignore - 'outlineStyle' is a web-only valid prop
+            // @ts-ignore 
             Platform.OS === 'web' && { outlineStyle: 'none' } 
           ]}
           value={value}
@@ -109,30 +112,74 @@ export default function Login() {
 
   // Dialog & Feedback State
   const [showVerifyDialog, setShowVerifyDialog] = useState(false);
+  
+  // 3. BAN DIALOG STATE
+  const [showBanDialog, setShowBanDialog] = useState(false);
+  const [banDetails, setBanDetails] = useState({ reason: "", date: "" });
+
   const [pendingUser, setPendingUser] = useState<any>(null);
   const [resendLoading, setResendLoading] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarColor, setSnackbarColor] = useState(COLORS.primary);
 
-  const API_URL = process.env.EXPO_PUBLIC_API_URL;
-  
   const showMessage = (message: string, isError: boolean = true) => {
     setSnackbarMessage(message);
     setSnackbarColor(isError ? COLORS.error : "#4CAF50");
     setSnackbarVisible(true);
   };
 
+  // --- MAIN AUTH LISTENER (Handles Redirects & Bans) ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user && user.emailVerified) {
+      if (user) {
         try {
-          const idToken = await user.getIdToken(true);
-          // Optional: Check backend status here
-           // const res = await fetch(`${API_URL}/auth/me`, { ... });
-          router.replace("/(tabs)");
+          // A. Check Ban Status First
+          const userDocRef = doc(db, "users", user.uid);
+          const userDoc = await getDoc(userDocRef);
+
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            
+            if (userData.isBanned === true) {
+              // PREVENT REDIRECT. Show Dialog instead.
+              
+              // Format Date
+              let dateStr = "Unknown Date";
+              if (userData.bannedAt) {
+                // Handle Firestore Timestamp or standard JS Date
+                const dateObj = typeof userData.bannedAt.toDate === 'function' 
+                  ? userData.bannedAt.toDate() 
+                  : new Date(userData.bannedAt);
+                  
+                dateStr = dateObj.toLocaleDateString('en-US', { 
+                  year: 'numeric', month: 'long', day: 'numeric' 
+                });
+              }
+
+              setBanDetails({
+                reason: userData.banReason || "Violation of Terms",
+                date: dateStr
+              });
+              
+              setCheckingAuth(false);
+              setLoading(false); // Stop any spinners
+              setShowBanDialog(true);
+              return; // STOP HERE. Do not check verification or redirect.
+            }
+          }
+
+          // B. Check Verification
+          await user.reload();
+          if (user.emailVerified) {
+            router.replace("/(tabs)");
+          } else {
+            // If not verified, stay here (handleLogin handles the trigger)
+            setCheckingAuth(false);
+          }
+
         } catch (err) {
-          await signOut(auth); 
+          console.error("Auth check failed:", err);
           setCheckingAuth(false);
         }
       } else {
@@ -143,7 +190,6 @@ export default function Login() {
   }, []);
   
   const handleEmailBlur = () => {
-    // Remove @ and anything after it when the user leaves the field
     if (email.includes("@")) {
       setEmail(email.replace(/@.*/, ""));
     }
@@ -160,28 +206,37 @@ export default function Login() {
     setLoading(true);
     try {
       const fullEmail = `${email.trim().toLowerCase()}@cvsu.edu.ph`;
+      if (Platform.OS === 'web') {
+        await setPersistence(auth, browserSessionPersistence);
+      }
+      
+      // We just sign in here. 
+      // The onAuthStateChanged listener above will handle the Ban Check & Redirect.
       const userCredential = await signInWithEmailAndPassword(auth, fullEmail, password);
       const user = userCredential.user;
-
-      await user.reload();
 
       if (!user.emailVerified) {
         setLoading(false); 
         setPendingUser(user);
         setShowVerifyDialog(true);
-        return; 
       }
       
-      router.replace("/(tabs)");
+      // If verified and not banned, the useEffect will redirect automatically.
+      
     } catch (e: any) {
       let msg = "Login failed.";
       if (e.code === "auth/invalid-credential") msg = "Incorrect email or password.";
       if (e.code === "auth/user-not-found") msg = "User not found.";
       if (e.code === "auth/wrong-password") msg = "Incorrect password.";
       showMessage(msg, true);
-    } finally {
       setLoading(false);
     }
+  };
+
+  // 4. Handle Closing the Ban Dialog (Signs out the user)
+  const handleCloseBanDialog = async () => {
+    setShowBanDialog(false);
+    await signOut(auth); // Sign out ONLY after they acknowledge the message
   };
 
   const handleResendVerification = async () => {
@@ -242,12 +297,10 @@ export default function Login() {
             <CustomInput
               label="CVSU Email"
               value={email}
-              // FIX: Just set the text directly. Don't replace() here.
               onChangeText={(text: string) => {
                 setEmail(text); 
                 if (emailError) setEmailError("");
               }}
-              // FIX: Clean the input when they lose focus instead
               onBlur={handleEmailBlur} 
               error={emailError}
               suffix="@cvsu.edu.ph"
@@ -316,6 +369,53 @@ export default function Login() {
           </Dialog>
         </Portal>
 
+        {/* 5. SUSPENSION DIALOG (Detailed) */}
+        <Portal>
+          <Dialog 
+            visible={showBanDialog} 
+            onDismiss={handleCloseBanDialog} 
+            style={{ backgroundColor: COLORS.white }}
+          >
+            <Dialog.Title style={{ color: COLORS.error, fontWeight: 'bold' }}>
+              <Ionicons name="warning" size={24} color={COLORS.error} /> Account Suspended
+            </Dialog.Title>
+            <Dialog.Content>
+              <Paragraph style={{ color: '#333', marginBottom: 15, fontSize: 15 }}>
+                Your account has been suspended and you cannot access the application.
+              </Paragraph>
+              
+              <View style={{ backgroundColor: '#FEF2F2', padding: 16, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' }}>
+                {/* Reason */}
+                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  <Text style={{ fontWeight: 'bold', color: '#991B1B', width: 80 }}>Reason:</Text>
+                  <Text style={{ color: '#7F1D1D', flex: 1 }}>{banDetails.reason}</Text>
+                </View>
+
+                {/* Date */}
+                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  <Text style={{ fontWeight: 'bold', color: '#991B1B', width: 80 }}>Date:</Text>
+                  <Text style={{ color: '#7F1D1D', flex: 1 }}>{banDetails.date}</Text>
+                </View>
+
+                {/* Action By */}
+                <View style={{ flexDirection: 'row' }}>
+                  <Text style={{ fontWeight: 'bold', color: '#991B1B', width: 80 }}>Action By:</Text>
+                  <Text style={{ color: '#7F1D1D', flex: 1, fontWeight: 'bold' }}>Admin</Text>
+                </View>
+              </View>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <PaperButton 
+                onPress={handleCloseBanDialog} 
+                textColor={COLORS.primary}
+                labelStyle={{ fontWeight: 'bold' }}
+              >
+                Close & Sign Out
+              </PaperButton>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
+
         <Snackbar
           visible={snackbarVisible}
           onDismiss={() => setSnackbarVisible(false)}
@@ -343,8 +443,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   scrollContent: {
-    flexGrow: 1,            // Ensures it takes full height
-    justifyContent: "center", // This centers the content VERTICALLY
+    flexGrow: 1,            
+    justifyContent: "center", 
     padding: 24,
     marginBottom: 100,
   },

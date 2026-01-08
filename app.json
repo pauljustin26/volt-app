@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.pauljustin.volt",
-      "googleServicesFile": "./android/app/google-services.json",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/app-icon.png",
