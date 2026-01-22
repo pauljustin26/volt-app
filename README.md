@@ -7,6 +7,8 @@ Volt is a cross-platform application designed for seamless rental and wallet man
 ## 🔗 Live Demo
 Access the web version here: **[https://voltvault-web.vercel.app/login](https://voltvault-web.vercel.app/login)**
 
+Access the apk version here: **[https://github.com/pauljustin26/volt-app/releases/download/v1.0.0/voltvault.apk](https://github.com/pauljustin26/volt-app/releases/download/v1.0.0/voltvault.apk)**
+
 ## 📱 Features
 - **Cross-Platform Support:** Runs on Android, iOS, and Web.
 - **User Authentication:** Login, Signup, and Password Reset flows.
